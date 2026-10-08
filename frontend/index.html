@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Embedding Facial • Sr. Valentim (Foto + Câmera)</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="embed">
+  <header>
+    <div>
+      <h1>🔒 Embedding Facial • Valentim</h1>
+      <span>frontend + backend Python — funciona com FOTO (sem câmera)</span>
+    </div>
+    <div id="cadBadge" class="no">⛔ SEM ROSTO GRAVADO</div>
+  </header>
+
+  <div id="tabs">
+    <button id="tabFoto" class="tab active">🖼️ Foto</button>
+    <button id="tabCam" class="tab">📷 Câmera</button>
+    <button id="tabGaleria" class="tab">🗂️ Galeria <span id="galCount">0</span></button>
+  </div>
+
+  <div id="steps">
+    <div><b>1:</b> Envie foto →</div>
+    <div><b>2:</b> Analise / Grave →</div>
+    <div><b>3:</b> Reconheça outra foto</div>
+  </div>
+
+  <!-- MODO FOTO -->
+  <div id="paneFoto">
+    <div id="photoStage">
+      <img id="photo" alt="Envie uma foto com rosto" />
+      <canvas id="photoCanvas"></canvas>
+    </div>
+    <div id="photoBar">
+      <label for="fileInput" id="fileLabel">📁 Escolher foto...</label>
+      <input id="fileInput" type="file" accept="image/*" hidden />
+      <span id="fileName">nenhuma foto</span>
+    </div>
+  </div>
+
+  <!-- MODO CAMERA -->
+  <div id="paneCam" hidden>
+    <div id="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+  </div>
+
+  <!-- GALERIA: foto + nome + análise em tempo real -->
+  <div id="paneGaleria" hidden>
+    <div id="galBar">
+      <span id="galInfo">Nenhuma análise salva ainda.</span>
+      <button id="btnClearGal" class="btn-clear sm">🗑️ Limpar galeria</button>
+    </div>
+    <div id="gallery"></div>
+  </div>
+
+  <h2 id="status" class="blocked">ENVIE UMA FOTO PARA COMEÇAR</h2>
+
+  <div id="nameRow">
+    <label for="nameInput" style="font-size:13px">Nome (opcional):</label>
+    <input id="nameInput" value="" maxlength="40" placeholder="Ex: Maria, João... deixe vazio = Sem nome" />
+  </div>
+
+  <div class="controls">
+    <button id="btnAnalyzePhoto" class="btn-cam" disabled>🔍 Analisar foto</button>
+    <button id="btnRegisterPhoto" class="btn-reg" disabled>💾 GRAVAR rosto da foto</button>
+    <button id="btnRecognizePhoto" class="btn-auth" disabled>✅ RECONHECER foto</button>
+  </div>
+
+  <div class="controls subtle">
+    <button id="btnCam" class="btn-cam">📷 Ligar câmera (opcional)</button>
+    <button id="btnRegister" class="btn-reg" disabled>💾 Gravar da câmera</button>
+    <button id="btnAuth" class="btn-auth" disabled>🔒 Reconhecer câmera</button>
+  </div>
+
+  <div class="controls subtle">
+    <button id="btnJson" class="btn-json" disabled>⬇️ Baixar JSON embedding</button>
+    <button id="btnClear" class="btn-clear">🗑️ Apagar gravação</button>
+  </div>
+
+  <div class="row">
+    <div class="pill" id="pillFace">Rosto: -</div>
+    <div class="pill" id="pillExpr">Expressão: -</div>
+    <div class="pill" id="pillAge">Idade: -</div>
+    <div class="pill" id="pillGen">Gênero: -</div>
+    <div class="pill" id="pillScore">Similaridade: -</div>
+  </div>
+
+  <div id="data"><pre id="jsonPreview">// Envie uma foto com rosto...</pre></div>
+  <div id="log">Dica: use foto de frente, boa luz, só 1 pessoa.</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
