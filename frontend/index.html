@@ -3,15 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Embedding Facial • Sr. Valentim (Foto + Câmera)</title>
+<meta name="theme-color" content="#070b16" />
+<title>Reconhecimento Facial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 <div id="embed">
   <header>
     <div>
-      <h1>🔒 Embedding Facial • Valentim</h1>
-      <span>frontend + backend Python — funciona com FOTO (sem câmera)</span>
+      <h1>🔒 Reconhecimento Facial</h1>
+      <span>Foto • Câmera • Vídeo com MediaPipe — sem câmera também funciona</span>
     </div>
     <div id="cadBadge" class="no">⛔ SEM ROSTO GRAVADO</div>
   </header>
@@ -19,14 +21,19 @@
   <div id="tabs">
     <button id="tabFoto" class="tab active">🖼️ Foto</button>
     <button id="tabCam" class="tab">📷 Câmera</button>
+    <button id="tabVideo" class="tab">🎥 Vídeo MP</button>
     <button id="tabGaleria" class="tab">🗂️ Galeria <span id="galCount">0</span></button>
   </div>
 
   <div id="steps">
-    <div><b>1:</b> Envie foto →</div>
-    <div><b>2:</b> Analise / Grave →</div>
-    <div><b>3:</b> Reconheça outra foto</div>
+    <div id="step1"><b>1:</b> Abra Câmera →</div>
+    <div id="step2"><b>2:</b> Grave seu rosto →</div>
+    <div id="step3"><b>3:</b> Reconheça ao vivo</div>
   </div>
+
+  <!-- Automação: barra de progresso + toasts -->
+  <div id="progressWrap" hidden><div id="progressBar"></div></div>
+  <div id="toasts" aria-live="polite"></div>
 
   <!-- MODO FOTO -->
   <div id="paneFoto">
@@ -41,11 +48,32 @@
     </div>
   </div>
 
-  <!-- MODO CAMERA -->
+  <!-- MODO CAMERA (principal: sem foto, usa webcam) -->
   <div id="paneCam" hidden>
     <div id="stage">
       <video id="video" autoplay muted playsinline></video>
       <canvas id="overlay"></canvas>
+      <div id="camTip">📷 Posicione seu rosto de frente, com boa luz</div>
+      <div id="camFace" class="buscando">procurando rosto…</div>
+    </div>
+  </div>
+
+  <!-- MODO VIDEO (MediaPipe backend) -->
+  <div id="paneVideo" hidden>
+    <div style="padding:14px 20px;background:#020617;border-bottom:1px solid #334155">
+      <p style="font-size:13px;color:#94a3b8;margin:0 0 10px">Envie um vídeo curto (10–15s, de frente, boa luz). O <b style="color:#fff">backend Python + MediaPipe</b> extrai seu embedding facial.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <label for="videoInput" id="fileLabel">🎥 Escolher vídeo...</label>
+        <input id="videoInput" type="file" accept="video/*" hidden />
+        <span id="videoName" style="font-size:12px;color:#94a3b8">nenhum vídeo</span>
+      </div>
+      <video id="videoPreview" controls muted playsinline style="width:100%;max-height:300px;margin-top:10px;border-radius:10px;background:#000"></video>
+      <div class="controls" style="padding:12px 0 0">
+        <button id="btnFrameFoto" class="btn-cam" disabled>🖼️ Analisar frame como FOTO (idade+expressão)</button>
+        <button id="btnRegisterVideo" class="btn-reg" disabled>💾 GRAVAR rosto do vídeo (MediaPipe)</button>
+        <button id="btnRecognizeVideo" class="btn-auth" disabled>✅ RECONHECER vídeo (MediaPipe)</button>
+      </div>
+      <div id="mpStatus" style="font-size:12px;color:#94a3b8;margin-top:8px">MediaPipe: verificando...</div>
     </div>
   </div>
 
@@ -72,9 +100,9 @@
   </div>
 
   <div class="controls subtle">
-    <button id="btnCam" class="btn-cam">📷 Ligar câmera (opcional)</button>
-    <button id="btnRegister" class="btn-reg" disabled>💾 Gravar da câmera</button>
-    <button id="btnAuth" class="btn-auth" disabled>🔒 Reconhecer câmera</button>
+    <button id="btnCam" class="btn-cam">📷 1. Ligar minha câmera</button>
+    <button id="btnRegister" class="btn-reg" disabled>💾 2. GRAVAR meu rosto</button>
+    <button id="btnAuth" class="btn-auth" disabled>🔒 3. RECONHECER ao vivo</button>
   </div>
 
   <div class="controls subtle">
@@ -92,8 +120,10 @@
 
   <div id="data"><pre id="jsonPreview">// Envie uma foto com rosto...</pre></div>
   <div id="log">Dica: use foto de frente, boa luz, só 1 pessoa.</div>
+  <div id="hint" class="hint">💡 Dica automática: arraste uma foto para cá, ou pressione <b>1/2/3</b> para trocar de aba, <b>A</b> analisar, <b>G</b> gravar, <b>R</b> reconhecer.</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script src="js/app.js"></script>
+<script src="js/auto.js"></script>
 </body>
 </html>

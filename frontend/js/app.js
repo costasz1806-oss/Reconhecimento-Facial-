@@ -21,24 +21,28 @@ function setStatus(t,c){ statusEl.textContent = t; statusEl.className = c; }
 
 async function ensureModels(){
   if(modelsLoaded) return true;
+  if(typeof faceapi === 'undefined'){ setStatus('FACE-API NÃO CARREGOU (CDN)','denied'); log('Sem internet ou CDN bloqueado. Recarregue a página.'); return false; }
   log('Carregando IA...'); setStatus('CARREGANDO IA...','scanning');
   const URLS = [
+    'models',
     'https://justadudewhohacks.github.io/face-api.js/models',
-    'https://venus714.github.io/Face-Recognition-Using-Face-API/models'
+    'https://venus714.github.io/Face-Recognition-Using-Face-API/models',
+    'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights'
   ];
   for(const u of URLS){
     try{
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(u),
-        faceapi.nets.faceLandmark68Net.loadFromUri(u),
-        faceapi.nets.faceRecognitionNet.loadFromUri(u),
-        faceapi.nets.faceExpressionNet.loadFromUri(u),
-        faceapi.nets.ageGenderNet.loadFromUri(u)
-      ]);
-      modelsLoaded = true; log('IA pronta. Envie uma foto.'); return true;
-    }catch(e){ console.warn(e); }
+      log('Tentando modelos: ' + u);
+      await faceapi.nets.tinyFaceDetector.loadFromUri(u);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(u);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(u);
+      await faceapi.nets.faceExpressionNet.loadFromUri(u);
+      await faceapi.nets.ageGenderNet.loadFromUri(u);
+      modelsLoaded = true; log('IA pronta via ' + u); return true;
+    }catch(e){ console.warn('modelos falharam em ' + u, e); log('Falhou em ' + u + ', tentando próximo...'); }
   }
-  setStatus('ERRO AO CARREGAR IA','denied'); return false;
+  setStatus('ERRO AO CARREGAR IA • SEM INTERNET?','denied');
+  log('Não carregou os modelos de IA. Verifique internet/adblock e recarregue.');
+  return false;
 }
 
 async function apiGetStatus(){
@@ -51,6 +55,7 @@ async function apiGetStatus(){
 }
 
 function refreshUI(){
+  const hasVideoFile = typeof videoFile !== 'undefined' && !!videoFile;
   if(cadastro){
     badge.className = 'yes';
     badge.textContent = '✅ GRAVADO: ' + (cadastro.owner||'').toUpperCase();
@@ -60,6 +65,8 @@ function refreshUI(){
     btnRecognizePhoto.disabled = !lastPhoto;
     btnAuth.disabled = !cameraOn;
     btnAuth.textContent = cameraOn ? '🔍 Reconhecer câmera' : '🔒 Reconhecer câmera';
+    if(typeof btnRecognizeVideo !== 'undefined' && btnRecognizeVideo) btnRecognizeVideo.disabled = !hasVideoFile;
+    const bf2 = $('btnFrameFoto'); if(bf2) bf2.disabled = !hasVideoFile;
     if(!cameraOn && lastPhoto) setStatus('ROSTO GRAVADO ✔ • ANALISE OUTRA FOTO PARA TESTAR','granted');
   }else{
     badge.className = 'no';
@@ -68,39 +75,160 @@ function refreshUI(){
     btnAuth.disabled = true;
     btnAuth.textContent = '🔒 Reconhecer câmera (bloqueado)';
     btnRecognizePhoto.disabled = true; // TRAVA: sem cadastro nao reconhece
+    if(typeof btnRecognizeVideo !== 'undefined' && btnRecognizeVideo) btnRecognizeVideo.disabled = true;
     if(!lastPhoto){ setStatus('ENVIE UMA FOTO PARA COMEÇAR','blocked'); jsonPreview.textContent='// Envie uma foto com rosto...'; }
     else { setStatus('FOTO ANALISADA • GRAVE PARA LIBERAR RECONHECIMENTO','blocked'); }
   }
   btnRegisterPhoto.disabled = !lastPhoto;
-  btnAnalyzePhoto.disabled = !photo.src;
+  const temArquivo = fileInput && fileInput.files && fileInput.files.length > 0;
+  btnAnalyzePhoto.disabled = !temArquivo || analyzing;
 }
 nameInput.addEventListener('input', ()=> nameInput.dataset.touched = '1');
 
 // abas
 function showPane(which){
-  ['Foto','Cam','Galeria'].forEach(t=>{
+  ['Foto','Cam','Video','Galeria'].forEach(t=>{
     $('tab'+t).classList.toggle('active', t===which);
     $('pane'+t).hidden = (t!==which);
   });
   if(which==='Galeria') carregarGaleria();
+  if(which==='Video') checkMediapipe();
 }
 $('tabFoto').onclick = ()=>showPane('Foto');
 $('tabCam').onclick = ()=>showPane('Cam');
+$('tabVideo').onclick = ()=>showPane('Video');
 $('tabGaleria').onclick = ()=>showPane('Galeria');
 
-// upload foto
+// ---- VIDEO -> backend MediaPipe ----
+const videoInput = $('videoInput'), videoName = $('videoName'), videoPreview = $('videoPreview');
+const btnRegisterVideo = $('btnRegisterVideo'), btnRecognizeVideo = $('btnRecognizeVideo');
+let videoFile = null;
+
+async function checkMediapipe(){
+  try{
+    const r = await fetch(API + "/api/mediapipe-status");
+    const j = await r.json();
+    $('mpStatus').textContent = j.instalado
+      ? `MediaPipe OK v${j.versao} • embedding ${j.dim_embedding} nums • threshold ${j.threshold}`
+      : `MediaPipe NÃO instalado no backend (${j.erro||''}) — rode: pip install -r backend/requirements.txt`;
+  }catch(e){ $('mpStatus').textContent = 'Backend offline.'; }
+}
+
+if(videoInput){
+  videoInput.onchange = ()=>{
+    videoFile = videoInput.files[0] || null;
+    if(!videoFile) return;
+    videoName.textContent = videoFile.name + ' (' + (videoFile.size/1024/1024).toFixed(1) + 'MB)';
+    videoPreview.src = URL.createObjectURL(videoFile);
+    btnRegisterVideo.disabled = false;
+    btnRecognizeVideo.disabled = !cadastro;
+    const bf = $('btnFrameFoto'); if(bf) bf.disabled = false;
+    log('Vídeo carregado. Pause num frame bom e use: frame como FOTO ou GRAVAR/RECONHECER.');
+  };
+  // pause no frame -> libera o botão frame-como-foto
+  videoPreview.addEventListener('loadeddata', ()=>{ const bf = $('btnFrameFoto'); if(bf && videoFile) bf.disabled = false; });
+  videoPreview.addEventListener('seeked', ()=>{ const bf = $('btnFrameFoto'); if(bf && videoFile) bf.disabled = false; });
+
+  // FRAME DO VÍDEO -> analisa no modelo FOTO (idade, expressão, gênero)
+  const btnFrameFoto = $('btnFrameFoto');
+  if(btnFrameFoto){
+    btnFrameFoto.onclick = async ()=>{
+      if(!videoFile){ log('Escolha um vídeo primeiro.'); return; }
+      if(videoPreview.readyState < 2 || !videoPreview.videoWidth){
+        setStatus('VÍDEO AINDA CARREGANDO... DÊ PLAY/PAUSE','scanning');
+        log('Espere o vídeo carregar, dê play e pause num frame com seu rosto.');
+        return;
+      }
+      try{
+        videoPreview.pause();
+        const c = document.createElement('canvas');
+        c.width = videoPreview.videoWidth; c.height = videoPreview.videoHeight;
+        c.getContext('2d').drawImage(videoPreview, 0, 0, c.width, c.height);
+        const blob = await new Promise(res=>c.toBlob(res, 'image/jpeg', 0.92));
+        if(!blob){ setStatus('FALHA AO CAPTURAR FRAME','denied'); return; }
+        const f = new File([blob], 'frame-video.jpg', { type: 'image/jpeg' });
+        const dt = new DataTransfer(); dt.items.add(f);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event('change'));
+        showPane('Foto');
+        log('Frame enviado para o modelo FOTO. Analisando idade/expressão...');
+      }catch(e){ console.error(e); setStatus('FALHA AO CAPTURAR FRAME','denied'); }
+    };
+  }
+
+  btnRegisterVideo.onclick = async ()=>{
+    if(!videoFile){ log('Escolha um vídeo primeiro.'); return; }
+    const nome = ((nameInput.value || '').trim() || 'Sem nome').slice(0,40);
+    const fd = new FormData();
+    fd.append('video', videoFile);
+    fd.append('owner', nome);
+    setStatus('PROCESSANDO VÍDEO COM MEDIAPIPE...','scanning'); log('Enviando vídeo ao backend MediaPipe...');
+    btnRegisterVideo.disabled = true;
+    try{
+      const r = await fetch(API + "/api/gravar-video", { method: "POST", body: fd });
+      const j = await r.json();
+      if(!r.ok || !j.ok){ setStatus('FALHA NO VÍDEO ⛔','denied'); log(j.erro||'Erro'); btnRegisterVideo.disabled = false; return; }
+      log(`Gravado via MediaPipe! ${j.frames_com_rosto}/${j.frames_total} frames com rosto • qualidade ${j.qualidade}%`);
+      jsonPreview.textContent = JSON.stringify(j, null, 2);
+      await apiGetStatus();
+      setStatus(`ROSTO GRAVADO VIA VÍDEO ✔ ${j.owner.toUpperCase()} (${j.frames_com_rosto} frames)`,'granted');
+      btnRecognizeVideo.disabled = false;
+    }catch(e){ console.error(e); setStatus('ERRO NO UPLOAD','denied'); }
+    btnRegisterVideo.disabled = false;
+  };
+
+  btnRecognizeVideo.onclick = async ()=>{
+    if(!videoFile){ log('Escolha um vídeo primeiro.'); return; }
+    if(!cadastro){ setStatus('⛔ GRAVE UM ROSTO PRIMEIRO','denied'); return; }
+    const fd = new FormData();
+    fd.append('video', videoFile);
+    setStatus('RECONHECENDO VÍDEO (MEDIAPIPE)...','scanning');
+    try{
+      const r = await fetch(API + "/api/reconhecer-video", { method: "POST", body: fd });
+      const j = await r.json();
+      if(r.status===403 && j.bloqueado){ setStatus(j.mensagem,'denied'); return; }
+      if(j.erro || j.ok===false){ setStatus('FALHA: '+(j.erro||''),'denied'); return; }
+      $('pillScore').textContent = `Similaridade: ${j.similaridade}% dist ${j.distancia}`;
+      setStatus(j.mensagem, j.reconhecido ? 'granted' : 'denied');
+      log(j.reconhecido ? `Match vídeo: ${j.owner} ${j.similaridade}%` : `Vídeo sem match. dist ${j.distancia}`);
+    }catch(e){ console.error(e); setStatus('ERRO NO UPLOAD','denied'); }
+  };
+}
+
+// upload foto — espera carregar de verdade e analisa sozinho
+let analyzing = false, pendingAuto = false;
+function esperarFotoPronta(){
+  return new Promise((resolve, reject)=>{
+    if(photo.complete && photo.naturalWidth > 0) return resolve();
+    const to = setTimeout(()=>reject(new Error('Imagem não carregou (arquivo inválido?)')), 15000);
+    photo.onload = ()=>{
+      clearTimeout(to);
+      photoCanvas.getContext('2d').clearRect(0,0,photoCanvas.width,photoCanvas.height);
+      resolve();
+    };
+    photo.onerror = ()=>{ clearTimeout(to); reject(new Error('Não abri essa imagem. Tente JPG/PNG.')); };
+  });
+}
 fileInput.onchange = async ()=>{
   const f = fileInput.files[0]; if(!f) return;
-  fileName.textContent = f.name;
-  photo.src = URL.createObjectURL(f);
+  if(!f.type.startsWith('image/')){ log('Arquivo não é imagem. Envie JPG/PNG.'); setStatus('ARQUIVO INVÁLIDO','denied'); return; }
+  if(photo.src && photo.src.startsWith('blob:')) URL.revokeObjectURL(photo.src);
+  fileName.textContent = f.name + ' (' + (f.size/1024).toFixed(0) + 'KB)';
   lastPhoto = null;
-  log('Foto carregada. Clique em Analisar foto.');
-  btnAnalyzePhoto.disabled = false;
+  setStatus('CARREGANDO FOTO...','scanning'); log('Foto recebida. Carregando...');
+  photo.src = URL.createObjectURL(f);
+  btnAnalyzePhoto.disabled = true; refreshUI();
+  try{
+    await esperarFotoPronta();
+    log('Foto carregada (' + photo.naturalWidth + 'x' + photo.naturalHeight + '). Analisando sozinho...');
+    pendingAuto = false;
+    await analisarFoto();
+  }catch(e){ setStatus(e.message || 'FALHA AO CARREGAR FOTO','denied'); log(e.message); }
   refreshUI();
 };
 
 photo.onload = ()=>{ // limpa canvas ao trocar foto
-  photoCanvas.getContext('2d').clearRect(0,0,photoCanvas.width,photoCanvas.height);
+  try{ photoCanvas.getContext('2d').clearRect(0,0,photoCanvas.width,photoCanvas.height); }catch(e){}
 };
 
 function updatePills(det, sim, dist){
@@ -181,18 +309,33 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<
 $('btnClearGal').onclick = async ()=>{ await fetch(API+"/api/historico",{method:"DELETE"}); carregarGaleria(); };
 
 // ANALISAR FOTO — leitura facial completa sem câmera
-btnAnalyzePhoto.onclick = async ()=>{
-  if(!photo.src){ log('Escolha uma foto primeiro.'); return; }
+async function analisarFoto(){
+  if(analyzing){ log('Análise já em andamento...'); return; }
+  if(!fileInput.files.length){ log('Escolha uma foto primeiro.'); setStatus('ESCOLHA UMA FOTO','blocked'); return; }
+  try{ await esperarFotoPronta(); }
+  catch(e){ setStatus(e.message,'denied'); return; }
   if(!await ensureModels()) return;
+  analyzing = true; refreshUI();
   setStatus('ANALISANDO FOTO...','scanning'); log('Analisando rosto da foto...');
   try{
-    const det = await faceapi.detectSingleFace(photo, new faceapi.TinyFaceDetectorOptions())
-      .withFaceLandmarks().withFaceDescriptor().withFaceExpressions().withAgeAndGender();
+    let det = null;
+    // tentativa 1: padrão | tentativa 2: mais sensível p/ foto escura/pequena
+    const tentativas = [
+      new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }),
+      new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 })
+    ];
+    for(const opt of tentativas){
+      try{
+        det = await faceapi.detectSingleFace(photo, opt)
+          .withFaceLandmarks().withFaceDescriptor().withFaceExpressions().withAgeAndGender();
+        if(det) break;
+      }catch(e){ console.warn('tentativa detector', e); }
+    }
     // desenha
     const dims = { width: photo.naturalWidth, height: photo.naturalHeight };
     photoCanvas.width = photo.clientWidth; photoCanvas.height = photo.clientHeight;
     const ctx = photoCanvas.getContext('2d'); ctx.clearRect(0,0,photoCanvas.width,photoCanvas.height);
-    if(!det){ setStatus('NENHUM ROSTO NA FOTO ⛔','denied'); log('Tente outra foto: de frente, boa luz, 1 pessoa.'); lastPhoto=null; refreshUI(); return; }
+    if(!det){ setStatus('NENHUM ROSTO NA FOTO ⛔','denied'); log('Tente outra foto: de frente, boa luz, 1 pessoa, sem óculos escuros.'); lastPhoto=null; analyzing=false; refreshUI(); return; }
     const scaleX = photo.clientWidth / dims.width, scaleY = photo.clientHeight / dims.height;
     const box = det.detection.box;
     ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 3;
@@ -218,8 +361,10 @@ btnAnalyzePhoto.onclick = async ()=>{
     refreshUI();
     if(cadastro) btnRecognizePhoto.disabled = false;
     await salvarNaGaleria('analise');
-  }catch(e){ console.error(e); setStatus('ERRO NA ANÁLISE','denied'); }
-};
+  }catch(e){ console.error(e); setStatus('ERRO NA ANÁLISE: ' + (e.message || e),'denied'); log('Erro: ' + (e.message || e)); }
+  analyzing = false; refreshUI();
+}
+btnAnalyzePhoto.onclick = analisarFoto;
 
 // GRAVAR foto no backend Python + baixa JSON
 btnRegisterPhoto.onclick = async ()=>{
@@ -258,45 +403,118 @@ function downloadJSON(o,f){
 }
 btnJson.onclick = ()=>{ if(cadastro) downloadJSON(cadastro,'embedding-'+cadastro.owner.toLowerCase().replace(/\s+/g,'-')+'.json'); };
 
-// câmera (opcional, mantido)
-btnCam.onclick = async ()=>{
+// câmera (PRINCIPAL: grava e reconhece sem foto)
+let camLoop = null, lastCamDet = null;
+async function ligarCamera(){
   if(!await ensureModels()) return;
+  if(!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'){
+    setStatus('CÂMERA EXIGE HTTPS OU LOCALHOST','denied');
+    log('Abra via http://localhost:5000 (não file://) e permita a câmera.');
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('NAVEGADOR SEM SUPORTE A CÂMERA','denied');
+    log('Use Chrome/Edge atualizado via localhost.');
+    return;
+  }
+  // fecha stream anterior
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); }
   try{
-    const s = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480} });
-    video.srcObject = s; await video.play(); cameraOn = true;
+    setStatus('LIGANDO CÂMERA...','scanning'); log('Pedindo permissão da câmera...');
+    const s = await navigator.mediaDevices.getUserMedia({
+      video:{ width:{ideal:720}, height:{ideal:560}, facingMode:'user' }, audio:false
+    });
+    video.srcObject = s; video.muted = true;
+    await video.play(); cameraOn = true;
     btnRegister.disabled = false; showPane('Cam');
-    log('Câmera ligada.'); refreshUI();
-    setInterval(async ()=>{
+    log('Câmera ligada. Posicione o rosto de frente.');
+    setStatus('CÂMERA LIGADA • POSICIONE O ROSTO','idle');
+    refreshUI();
+    if(camLoop) clearInterval(camLoop);
+    camLoop = setInterval(async ()=>{
       if(video.paused||video.ended||authActive||!cameraOn) return;
       try{
-        const d = await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions().withAgeAndGender();
+        const d = await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.4})).withFaceLandmarks().withFaceExpressions().withAgeAndGender();
         const dims={width:video.videoWidth||640,height:video.videoHeight||480};
         faceapi.matchDimensions(canvas,dims); canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
-        if(d){ const r=faceapi.resizeResults(d,dims); faceapi.draw.drawDetections(canvas,r); faceapi.draw.drawFaceLandmarks(canvas,r); }
+        const tip = document.getElementById('camFace');
+        if(d){
+          lastCamDet = d;
+          const r=faceapi.resizeResults(d,dims); faceapi.draw.drawDetections(canvas,r); faceapi.draw.drawFaceLandmarks(canvas,r);
+          if(tip){ tip.textContent = 'rosto OK ✓ pode GRAVAR'; tip.className = 'ok'; }
+          const ex = Object.entries(d.expressions).sort((a,b)=>b[1]-a[1])[0];
+          updatePills(d, null, null);
+        } else if(tip){ tip.textContent = 'procurando rosto… chegue perto, boa luz'; tip.className = 'buscando'; }
       }catch(e){}
-    },600);
-  }catch(e){ log('Sem câmera: '+e.message+' — use o modo FOTO.'); }
-};
+    },500);
+  }catch(e){
+    cameraOn = false; refreshUI();
+    let msg = 'Sem câmera: ' + (e.name || '') + ' ' + (e.message || '');
+    if(e.name==='NotFoundError' || e.name==='OverconstrainedError'){ msg = 'Nenhuma webcam encontrada. Conecte uma câmera ou use a aba Foto.'; setStatus('NENHUMA CÂMERA ENCONTRADA','denied'); }
+    else if(e.name==='NotAllowedError'){ msg = 'Permissão negada. Clique no cadeado do navegador → permitir câmera → tente de novo.'; setStatus('PERMISSÃO DA CÂMERA NEGADA','denied'); }
+    else if(e.name==='NotReadableError'){ msg = 'Câmera em uso por outro app (Zoom/Meet). Feche e tente de novo.'; setStatus('CÂMERA EM USO','denied'); }
+    else setStatus('FALHA NA CÂMERA','denied');
+    log(msg);
+  }
+}
+btnCam.onclick = ligarCamera;
+// abrir a aba câmera já tenta ligar sozinha
+$('tabCam').addEventListener('click', ()=>{ if(!cameraOn) ligarCamera(); });
+// captura o MELHOR frame de N tentativas (mais estável sem foto)
+async function capturarMelhorRosto(tentativas){
+  tentativas = tentativas || 6;
+  let melhor = null, melhorScore = -1;
+  for(let i=0;i<tentativas;i++){
+    try{
+      const d = await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:0.35})).withFaceLandmarks().withFaceDescriptor().withFaceExpressions().withAgeAndGender();
+      if(d && d.detection.score > melhorScore){ melhorScore = d.detection.score; melhor = d; }
+      if(melhorScore > 0.9) break;
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,250));
+  }
+  return melhor;
+}
 btnRegister.onclick = async ()=>{
-  if(!cameraOn) return;
-  const d = await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor().withFaceExpressions().withAgeAndGender();
-  if(!d){ setStatus('SEM ROSTO NA CÂMERA','denied'); return; }
+  if(!cameraOn){ await ligarCamera(); if(!cameraOn) return; }
+  setStatus('CAPTURANDO ROSTO... FIQUE PARADO','scanning'); log('Capturando melhor frame (6 tentativas)...');
+  const d = await capturarMelhorRosto(6);
+  if(!d){ setStatus('SEM ROSTO NA CÂMERA • CHEGUE PERTO','denied'); log('Não achei rosto. Boa luz, de frente, sem cobrir o rosto.'); return; }
   const exS=Object.entries(d.expressions).sort((a,b)=>b[1]-a[1]);
   const camName = (nameInput.value || '').trim() || 'Sem nome';
   const payload={ owner:camName, descriptor:Array.from(d.descriptor), age:+d.age.toFixed(1), gender:d.gender, genderProbability:d.genderProbability, expressions:d.expressions, dominantExpression:{name:exS[0][0],probability:exS[0][1]}, landmarks:d.landmarks.positions.map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1)})) };
-  await fetch(API+"/api/gravar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  downloadJSON(payload,'embedding-camera.json'); await apiGetStatus();
+  try{
+    const r = await fetch(API+"/api/gravar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const j = await r.json();
+    if(!r.ok){ setStatus(j.erro||'ERRO AO GRAVAR','denied'); return; }
+    downloadJSON({...payload, createdAt:new Date().toISOString()},'embedding-camera.json');
+    updatePills(d, null, null);
+    await apiGetStatus();
+    setStatus('ROSTO GRAVADO PELA CÂMERA ✔ AGORA CLIQUE RECONHECER','granted');
+    log('Gravado! Score ' + Math.round(d.detection.score*100) + '%. Pode testar o reconhecimento.');
+  }catch(e){ setStatus('BACKEND OFFLINE','denied'); }
 };
-btnAuth.onclick = ()=>{
+btnAuth.onclick = async ()=>{
   if(!cadastro){ setStatus('⛔ ACESSO NEGADO • GRAVE PRIMEIRO','denied'); return; }
-  if(!cameraOn || authActive){ if(authActive){authActive=false;clearInterval(authInterval);refreshUI();} return; }
-  authActive=true; btnAuth.textContent='⏸️ Parar';
+  if(!cameraOn){ await ligarCamera(); if(!cameraOn) return; }
+  if(authActive){ authActive=false; clearInterval(authInterval); btnAuth.textContent='🔒 3. RECONHECER ao vivo'; refreshUI(); return; }
+  // 1 teste imediato (melhor frame) + depois modo contínuo
+  setStatus('RECONHECENDO... FIQUE PARADO','scanning');
+  const d0 = await capturarMelhorRosto(4);
+  if(d0){
+    try{
+      const r0=await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:Array.from(d0.descriptor)})});
+      const j0=await r0.json(); setStatus(j0.mensagem, j0.reconhecido?'granted':'denied'); updatePills(d0, j0.similaridade, j0.distancia);
+    }catch(e){}
+  }
+  authActive=true; btnAuth.textContent='⏸️ Parar ao vivo';
   authInterval=setInterval(async()=>{
-    const d=await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-    if(!d) return;
-    const r=await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:Array.from(d.descriptor)})});
-    const j=await r.json(); setStatus(j.mensagem, j.reconhecido?'granted':'denied');
-  },900);
+    try{
+      const d=await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.4})).withFaceLandmarks().withFaceDescriptor();
+      if(!d) return;
+      const r=await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:Array.from(d.descriptor)})});
+      const j=await r.json(); setStatus(j.mensagem, j.reconhecido?'granted':'denied');
+    }catch(e){}
+  },1200);
 };
 btnClear.onclick = async ()=>{ if(authActive){authActive=false;clearInterval(authInterval);} await fetch(API+"/api/apagar",{method:"DELETE"}); cadastro=null; lastPhoto=null; refreshUI(); log('Apagado. Bloqueado de novo.'); };
 
