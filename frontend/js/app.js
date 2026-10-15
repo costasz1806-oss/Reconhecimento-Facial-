@@ -169,8 +169,9 @@ if(videoInput){
     try{
       const r = await fetch(API + "/api/gravar-video", { method: "POST", body: fd });
       const j = await r.json();
-      if(!r.ok || !j.ok){ setStatus('FALHA NO VÍDEO ⛔','denied'); log(j.erro||'Erro'); btnRegisterVideo.disabled = false; return; }
+      if(!r.ok || !j.ok){ setStatus('FALHA NO VÍDEO','denied'); log(j.erro||'Erro'); btnRegisterVideo.disabled = false; return; }
       log(`Gravado via MediaPipe! ${j.frames_com_rosto}/${j.frames_total} frames com rosto • qualidade ${j.qualidade}%`);
+      if(j.dominantExpression) $('pillExpr').textContent = `Expressão: ${j.dominantExpression.name} ${Math.round(j.dominantExpression.probability * 100)}%`;
       jsonPreview.textContent = JSON.stringify(j, null, 2);
       await apiGetStatus();
       setStatus(`ROSTO GRAVADO VIA VÍDEO ✔ ${j.owner.toUpperCase()} (${j.frames_com_rosto} frames)`,'granted');
@@ -492,6 +493,19 @@ btnRegister.onclick = async ()=>{
     if(!r.ok){ setStatus(j.erro||'ERRO AO GRAVAR','denied'); return; }
     downloadJSON({...payload, createdAt:new Date().toISOString()},'embedding-camera.json');
     updatePills(d, null, null);
+    // salva na galeria/base com foto + características (antes a câmera não salvava nada)
+    try{
+      const c = document.createElement('canvas');
+      const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+      const tw = 240; c.width = tw; c.height = Math.round(vh * tw / vw);
+      c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+      await fetch(API + "/api/historico", { method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ nome: camName, tipo: "gravado", foto: c.toDataURL('image/jpeg', 0.72),
+          idade: Math.round(d.age), genero: d.gender,
+          expressao: exS[0][0] + ' ' + Math.round(exS[0][1] * 100) + '%',
+          descriptor: Array.from(d.descriptor), fonte: "camera" }) });
+      await carregarGaleria();
+    }catch(e){ console.warn('galeria camera', e); }
     await apiGetStatus();
     setStatus('ROSTO GRAVADO PELA CÂMERA ✔ AGORA CLIQUE RECONHECER','granted');
     log('Gravado! Score ' + Math.round(d.detection.score*100) + '%. Pode testar o reconhecimento.');

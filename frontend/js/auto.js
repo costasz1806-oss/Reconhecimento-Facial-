@@ -195,14 +195,49 @@
   }
   function baseDados() {
     const bJ = $('btnExpJson'), bC = $('btnExpCsv'), bB = $('btnBackup');
-    if (bJ) bJ.onclick = () => { baixar('/api/export/json', 'base-facial.json'); toast('⬇️ JSON exportado (pasta de downloads).', 'ok'); };
-    if (bC) bC.onclick = () => { baixar('/api/export/csv', 'base-facial.csv'); toast('📊 CSV exportado — abre no Excel.', 'ok'); };
-    if (bB) bB.onclick = () => { baixar('/api/export/backup', 'banco-facial.db'); toast('💾 Backup .db exportado.', 'ok'); };
+    async function donoSlug(forcar) {
+      const base = (forcar || '').trim();
+      if (base) return base.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9áéíóúâêôãõç-]/gi, '').slice(0, 30) || 'sem-nome';
+      try {
+        const r = await fetch('/api/status');
+        const j = await r.json();
+        return (j.owner || 'sem-nome').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9áéíóúâêôãõç-]/gi, '').slice(0, 30) || 'sem-nome';
+      } catch (e) { return 'sem-nome'; }
+    }
+    if (bJ) bJ.onclick = async () => {
+      const n = (($('expNome') && $('expNome').value) || '').trim();
+      baixar('/api/export/json' + (n ? '?nome=' + encodeURIComponent(n) : ''), `rosto-${await donoSlug(n)}.json`);
+      toast(n ? `⬇️ JSON de ${n} exportado.` : '⬇️ JSON exportado (pasta de downloads).', 'ok');
+    };
+    if (bC) bC.onclick = async () => {
+      const n = (($('expNome') && $('expNome').value) || '').trim();
+      baixar('/api/export/csv' + (n ? '?nome=' + encodeURIComponent(n) : ''), `base-facial-${await donoSlug(n)}.csv`);
+      toast(n ? `📊 CSV de ${n} exportado.` : '📊 CSV exportado — abre no Excel.', 'ok');
+    };
+    if (bB) bB.onclick = async () => { baixar('/api/export/backup', `banco-facial-${await donoSlug()}.db`); toast('💾 Backup .db exportado.', 'ok'); };
     setInterval(async () => {
       try {
         const r = await fetch('/api/db-info');
         const j = await r.json();
         if (j.ok && $('dbInfo')) $('dbInfo').textContent = `SQLite • ${j.rostos} rostos • ${j.historico} análises`;
+      } catch (e) {}
+      try {
+        const r2 = await fetch('/api/exports');
+        const j2 = await r2.json();
+        const box = $('expList');
+        if (box) {
+          if (!j2.total) box.textContent = 'Nenhum CSV por pessoa ainda — grave um rosto com nome.';
+          else {
+            box.innerHTML = '📁 CSVs por pessoa: ';
+            j2.arquivos.forEach((a, i) => {
+              const link = document.createElement('a');
+              link.href = '/api/exports/' + a.arquivo.replace(/\.csv$/, '');
+              link.textContent = `${a.arquivo} (${a.linhas})`;
+              link.style.cssText = 'color:#38bdf8;margin-right:10px';
+              box.appendChild(link);
+            });
+          }
+        }
       } catch (e) {}
     }, 10000);
   }

@@ -30,6 +30,7 @@ FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend"))
 BANCO_PATH = os.path.join(BASE_DIR, "banco.json")       # legado (migrado p/ SQLite)
 HISTORICO_PATH = os.path.join(BASE_DIR, "historico.json")  # legado (migrado p/ SQLite)
 DB_PATH = os.path.join(BASE_DIR, "banco.db")            # base oficial SQLite
+EXPORTS_DIR = os.path.join(BASE_DIR, "exports")         # um CSV por pessoa (auto)
 THRESHOLD = 0.6              # threshold face-api.js (128-d)
 THRESHOLD_MEDIAPIPE = 0.18   # threshold MediaPipe FaceMesh (1404-d normalizado)
 MAX_HISTORICO = 100
@@ -264,6 +265,45 @@ def db_add_historico(item):
     con.commit(); con.close()
 
 
+def _registrar_historico(item):
+    """Salva no SQLite + espelha no JSON legado (câmera/vídeo também aparecem na galeria)."""
+    item.setdefault("id", datetime.now().strftime("%Y%m%d%H%M%S%f"))
+    item.setdefault("createdAt", datetime.now().isoformat())
+    try:
+        db_add_historico(item)
+    except Exception:
+        pass
+    try:
+        lista = carregar_historico()
+        lista.insert(0, item)
+        salvar_historico(lista[:MAX_HISTORICO])
+    except Exception:
+        pass
+    _escrever_csv_pessoa(item.get("nome"))  # CSV individual sempre atualizado
+    return item
+
+
+def _miniatura_video(video_path, largura=240):
+    """Extrai um frame (~30% do vídeo) como thumbnail dataURL JPEG."""
+    try:
+        import base64
+        cap = cv2.VideoCapture(video_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total // 3))
+        ok, frame = cap.read()
+        cap.release()
+        if not ok:
+            return ""
+        h, w = frame.shape[:2]
+        nova_h = max(1, int(h * largura / w))
+        frame = cv2.resize(frame, (largura, nova_h))
+        _, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+        return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+    except Exception:
+        return ""
+
+
 db_init()
 
 
@@ -315,7 +355,26 @@ def _extrair_via_solutions(video_path):
             xs, ys = pts[:, 0], pts[:, 1]
             bboxes.append([float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())])
     cap.release()
-    return vetores, bboxes, frames_total
+    return vetores, bboxes, frames_total, None
+
+
+def _emocao_de_blendshapes(media):
+    """Converte os 52 blendshapes do MediaPipe nas 7 emoções do site."""
+    def g(*nomes):
+        return max([float(media.get(n, 0)) for n in nomes] + [0.0])
+    emo = {
+        "happy": g("mouthSmileLeft", "mouthSmileRight", "cheekSquintLeft", "cheekSquintRight"),
+        "sad": g("mouthFrownLeft", "mouthFrownRight", "browInnerUp"),
+        "angry": g("browDownLeft", "browDownRight"),
+        "surprised": g("jawOpen", "browOuterUpLeft", "browOuterUpRight"),
+        "fearful": g("eyeWideLeft", "eyeWideRight"),
+        "disgusted": g("noseSneerLeft", "noseSneerRight", "mouthUpperUpLeft", "mouthUpperUpRight"),
+    }
+    topo = max(emo.values()) if emo else 0.0
+    emo["neutral"] = max(0.0, 1.0 - topo * 1.6)
+    dom = max(emo, key=emo.get)
+    return ({k: round(float(v), 3) for k, v in emo.items()},
+            {"name": dom, "probability": round(float(emo[dom]), 3)})
 
 
 def _extrair_via_tasks(video_path):
@@ -332,11 +391,12 @@ def _extrair_via_tasks(video_path):
         min_face_detection_confidence=0.5,
         min_face_presence_confidence=0.5,
         min_tracking_confidence=0.5,
+        output_face_blendshapes=True,  # p/ salvar a EXPRESSÃO do rosto
     )
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError("Não foi possível abrir o vídeo. Envie mp4/avi/mov/webm.")
-    vetores, bboxes, frames_total, idx = [], [], 0, 0
+    vetores, bboxes, blends, frames_total, idx = [], [], [], 0, 0
     with mp_vision.FaceLandmarker.create_from_options(options) as landmarker:
         while True:
             ok, frame = cap.read()
@@ -360,8 +420,14 @@ def _extrair_via_tasks(video_path):
             vetores.append(vec)
             xs, ys = pts[:, 0], pts[:, 1]
             bboxes.append([float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())])
+            if res.face_blendshapes:
+                blends.append({c.category_name: float(c.score) for c in res.face_blendshapes[0]})
     cap.release()
-    return vetores, bboxes, frames_total
+    media_blend = None
+    if blends:
+        chaves = set().union(*[b.keys() for b in blends])
+        media_blend = {k: sum(b.get(k, 0.0) for b in blends) / len(blends) for k in chaves}
+    return vetores, bboxes, frames_total, media_blend
 
 
 def extrair_embedding_mediapipe(video_path):
@@ -377,9 +443,9 @@ def extrair_embedding_mediapipe(video_path):
             f"(erro original: {MEDIAPIPE_ERRO})"
         )
     if MEDIAPIPE_MODO == "solutions":
-        vetores, bboxes, frames_total = _extrair_via_solutions(video_path)
+        vetores, bboxes, frames_total, media_blend = _extrair_via_solutions(video_path)
     else:
-        vetores, bboxes, frames_total = _extrair_via_tasks(video_path)
+        vetores, bboxes, frames_total, media_blend = _extrair_via_tasks(video_path)
 
     if not vetores:
         raise ValueError(
@@ -394,6 +460,13 @@ def extrair_embedding_mediapipe(video_path):
     if bboxes:
         bbox_medio = [round(float(x), 4) for x in np.mean(np.array(bboxes), axis=0).tolist()]
 
+    expressions, dominant = (None, None)
+    if media_blend:
+        try:
+            expressions, dominant = _emocao_de_blendshapes(media_blend)
+        except Exception:
+            pass
+
     return {
         "embedding": [float(x) for x in media.tolist()],  # 1404 números
         "dim": len(media.tolist()),
@@ -402,6 +475,8 @@ def extrair_embedding_mediapipe(video_path):
         "frames_usados": len(vetores),
         "bbox_medio": bbox_medio,
         "qualidade": qualidade,
+        "expressions": expressions,
+        "dominantExpression": dominant,
     }
 
 
@@ -522,6 +597,7 @@ def gravar_video():
     try:
         tmp_path = _salvar_temp_video(request.files["video"])
         info = extrair_embedding_mediapipe(tmp_path)
+        thumb = _miniatura_video(tmp_path)
     except ValueError as e:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -558,8 +634,20 @@ def gravar_video():
         },
         "mediapipe_qualidade": info["qualidade"],
         "mediapipe_bbox_medio": info["bbox_medio"],
+        "expressions": info.get("expressions"),
+        "dominantExpression": info.get("dominantExpression"),
     }
     salvar_banco(registro)
+    dom = info.get("dominantExpression") or {}
+    expr_txt = f"{dom.get('name', '?')} {round((dom.get('probability') or 0) * 100)}%" if dom.get("name") else ""
+    _registrar_historico({
+        "nome": owner,
+        "foto": thumb,
+        "tipo": "gravado",
+        "fonte": "mediapipe-video",
+        "descriptor": info["embedding"],
+        "expressao": expr_txt,
+    })
     return jsonify({
         "ok": True,
         "mensagem": f"Rosto de {owner} gravado via MediaPipe!",
@@ -569,6 +657,8 @@ def gravar_video():
         "frames_com_rosto": info["frames_com_rosto"],
         "qualidade": info["qualidade"],
         "dim": info["dim"],
+        "expressions": info.get("expressions"),
+        "dominantExpression": info.get("dominantExpression"),
     })
 
 
@@ -591,6 +681,7 @@ def reconhecer_video():
     try:
         tmp_path = _salvar_temp_video(request.files["video"])
         info = extrair_embedding_mediapipe(tmp_path)
+        thumb = _miniatura_video(tmp_path)
     except ValueError as e:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -603,7 +694,15 @@ def reconhecer_video():
                 pass
 
     dist, sim = comparar_mediapipe(banco["mediapipe_descriptor"], info["embedding"])
+    dom_probe = info.get("dominantExpression") or {}
+    expr_txt = f"{dom_probe.get('name', '?')} {round((dom_probe.get('probability') or 0) * 100)}%" if dom_probe else ""
     if dist < banco.get("threshold_mediapipe", THRESHOLD_MEDIAPIPE):
+        _registrar_historico({
+            "nome": banco["owner"], "foto": thumb, "tipo": "reconhecimento",
+            "fonte": "mediapipe-video", "descriptor": info["embedding"],
+            "expressao": expr_txt,
+            "similaridade": round(sim, 1), "distancia": round(dist, 4), "reconhecido": True,
+        })
         return jsonify({
             "reconhecido": True,
             "bloqueado": False,
@@ -614,6 +713,12 @@ def reconhecer_video():
             "qualidade": info["qualidade"],
             "mensagem": f"SEJA BEM-VINDO, {banco['owner'].upper()} ✔ (MediaPipe)"
         })
+    _registrar_historico({
+        "nome": "Sem nome", "foto": thumb, "tipo": "reconhecimento",
+        "fonte": "mediapipe-video", "descriptor": info["embedding"],
+        "expressao": expr_txt,
+        "similaridade": round(sim, 1), "distancia": round(dist, 4), "reconhecido": False,
+    })
     return jsonify({
         "reconhecido": False,
         "bloqueado": False,
@@ -647,7 +752,7 @@ def reconhecer():
             return jsonify({
                 "reconhecido": False,
                 "bloqueado": True,
-                "mensagem": "⛔ Nenhum embedding MediaPipe gravado. Grave via vídeo primeiro."
+                "mensagem": "Nenhum embedding de vídeo gravado. Grave via vídeo primeiro."
             }), 403
         dist, sim = comparar_mediapipe(banco["mediapipe_descriptor"], mp_descriptor)
         if dist < banco.get("threshold_mediapipe", THRESHOLD_MEDIAPIPE):
@@ -746,12 +851,7 @@ def adicionar_historico():
         "descriptor": dados.get("descriptor"),  # embedding 128-d p/ identificar depois
         "fonte": dados.get("fonte") or "face-api",
     }
-    try:
-        db_add_historico(item)
-    except Exception:
-        pass
-    lista.insert(0, item)  # mais recente primeiro (tempo real)
-    salvar_historico(lista[:MAX_HISTORICO])
+    _registrar_historico(item)
     return jsonify({"ok": True, "item": item})
 
 
@@ -761,6 +861,12 @@ def limpar_historico():
         con = _db()
         con.execute("DELETE FROM historico")
         con.commit(); con.close()
+    except Exception:
+        pass
+    try:  # limpa os CSVs por pessoa junto
+        import glob as _glob
+        for f in _glob.glob(os.path.join(EXPORTS_DIR, "*.csv")):
+            os.remove(f)
     except Exception:
         pass
     salvar_historico([])
@@ -774,13 +880,19 @@ def renomear_item(item_id):
     nome = (dados.get("nome") or "").strip()[:40]
     if not nome:
         return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    antigo = None
     try:
         con = _db()
+        r = con.execute("SELECT nome FROM historico WHERE id=?", (item_id,)).fetchone()
+        antigo = r["nome"] if r else None
         con.execute("UPDATE historico SET nome=? WHERE id=?", (nome, item_id))
         con.commit(); con.close()
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)}), 500
     salvar_historico([x if x.get("id") != item_id else {**x, "nome": nome} for x in carregar_historico()])
+    if antigo:
+        _escrever_csv_pessoa(antigo)
+    _escrever_csv_pessoa(nome)
     return jsonify({"ok": True, "id": item_id, "nome": nome})
 
 
@@ -881,6 +993,8 @@ def identificar_id():
     ranking = []
     for c in cands:
         try:
+            if len(c["descriptor"]) != len(desc):
+                continue  # nunca mistura embedding 128-d com 1404-d
             dist = distancia_euclidiana(desc, c["descriptor"])
             ranking.append({"nome": c["nome"], "origem": c["origem"],
                             "distancia": round(dist, 4),
@@ -895,50 +1009,169 @@ def identificar_id():
 
 @app.route("/api/historico/<item_id>", methods=["DELETE"])
 def remover_item(item_id):
+    afetado = None
     try:
         con = _db()
+        r = con.execute("SELECT nome FROM historico WHERE id=?", (item_id,)).fetchone()
+        afetado = r["nome"] if r else None
         con.execute("DELETE FROM historico WHERE id=?", (item_id,))
         con.commit(); con.close()
     except Exception:
         pass
     lista = [x for x in carregar_historico() if x.get("id") != item_id]
     salvar_historico(lista)
+    if afetado:
+        _escrever_csv_pessoa(afetado)
     return jsonify({"ok": True})
 
 
 # ---------- EXPORTAÇÃO: base de dados em documento ----------
+def _slug(texto):
+    import re, unicodedata
+    try:
+        t = unicodedata.normalize("NFKD", (texto or "").strip()).encode("ascii", "ignore").decode("ascii")
+        slug = re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")[:30]
+        return slug or "sem-nome"
+    except Exception:
+        return "sem-nome"
+
+
+def _slug_owner():
+    try:
+        b = carregar_banco() or {}
+        return _slug(b.get("owner") or "sem-nome")
+    except Exception:
+        return "sem-nome"
+
+
+def _filtrar_nome(lista, nome):
+    """?nome=Maria → só linhas dessa pessoa (base CSV individual)."""
+    nome = (nome or "").strip().lower()
+    if not nome:
+        return lista, None
+    return ([x for x in lista if (x.get("nome") or "").strip().lower() == nome], nome)
+
+
 @app.route("/api/export/json", methods=["GET"])
 def export_json():
-    """Baixa tudo (rosto ativo + histórico) em JSON — pasta/documento de base de dados."""
+    """Baixa tudo (rosto ativo + histórico) em JSON. ?nome=X exporta só essa pessoa."""
     from flask import Response
+    hist, so_nome = _filtrar_nome(carregar_historico(), request.args.get("nome"))
+    if so_nome and not hist:
+        return jsonify({"ok": False, "erro": f"Nenhum registro com nome '{request.args.get('nome')}'"}), 404
     dump = {
         "exportado_em": datetime.now().isoformat(),
+        "filtro_nome": so_nome,
         "cadastro": carregar_banco(),
-        "historico": carregar_historico(),
+        "historico": hist,
     }
+    slug = _slug(so_nome) if so_nome else _slug_owner()
     return Response(json.dumps(dump, ensure_ascii=False, indent=2),
                     mimetype="application/json",
-                    headers={"Content-Disposition": "attachment; filename=base-facial.json"})
+                    headers={"Content-Disposition": f"attachment; filename=rosto-{slug}.json"})
 
 
 @app.route("/api/export/csv", methods=["GET"])
 def export_csv():
-    """Histórico em CSV (abre no Excel). ?com_foto=1 inclui thumbnail base64."""
+    """Histórico em CSV que abre certo no Excel BR (BOM + ponto-e-vírgula).
+    Colunas: características (idade/gênero/expressão) + embedding.
+    ?com_foto=1 inclui thumbnail. ?nome=X exporta só essa pessoa (base individual)."""
     import csv, io
     from flask import Response
     com_foto = request.args.get("com_foto") == "1"
-    hist = carregar_historico()
+    filtro = (request.args.get("nome") or "").strip().lower()
+    hist = _linhas_csv(filtro, com_foto)
+    if filtro and not hist:
+        return jsonify({"ok": False, "erro": f"Nenhum registro com nome '{request.args.get('nome')}'"}), 404
     buf = io.StringIO()
-    cols = ["id", "nome", "idade", "genero", "expressao", "similaridade", "distancia", "reconhecido", "tipo", "createdAt"] + (["foto"] if com_foto else ["tem_foto"])
-    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    buf.write("﻿")  # BOM p/ Excel abrir UTF-8 com acentos
+    cols = ["id", "nome", "idade", "genero", "expressao", "similaridade", "distancia",
+            "reconhecido", "tipo", "fonte", "tem_embedding", "dim_embedding",
+            "tem_foto", "created_at", "embedding"] + (["foto"] if com_foto else [])
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore", delimiter=";")
     w.writeheader()
     for it in hist:
-        row = {k: it.get(k) for k in cols if k != "tem_foto"}
-        if not com_foto:
-            row["tem_foto"] = "sim" if it.get("foto") else "nao"
-        w.writerow(row)
-    return Response(buf.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=base-facial.csv"})
+        w.writerow(it)
+    slug = _slug(request.args.get("nome")) if filtro else _slug_owner()
+    return Response(buf.getvalue(), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=base-facial-{slug}.csv"})
+
+
+def _linhas_csv(filtro="", com_foto=False):
+    """Linhas prontas p/ CSV (usado no download e no CSV por pessoa)."""
+    filtro = (filtro or "").strip().lower()
+    try:
+        con = _db()
+        if filtro:
+            rows = con.execute(
+                "SELECT id,nome,idade,genero,expressao,similaridade,distancia,reconhecido,tipo,fonte,created_at,foto,descriptor FROM historico WHERE lower(nome)=? ORDER BY created_at DESC",
+                (filtro,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT id,nome,idade,genero,expressao,similaridade,distancia,reconhecido,tipo,fonte,created_at,foto,descriptor FROM historico ORDER BY created_at DESC"
+            ).fetchall()
+        con.close()
+        base = [dict(r) for r in rows]
+    except Exception:
+        base = carregar_historico()
+        if filtro:
+            base = [x for x in base if (x.get("nome") or "").strip().lower() == filtro]
+    hist = []
+    for it in base:
+        rec = it.get("reconhecido")
+        if rec is True or rec == 1:
+            rec_txt = "sim"
+        elif rec is False or rec == 0:
+            rec_txt = "nao"
+        else:
+            rec_txt = ""
+        emb = it.get("descriptor")
+        try:
+            emb = json.loads(emb) if isinstance(emb, str) else emb
+        except Exception:
+            emb = None
+        hist.append({
+            "id": it.get("id"), "nome": it.get("nome"), "idade": it.get("idade"),
+            "genero": it.get("genero"), "expressao": it.get("expressao"),
+            "similaridade": it.get("similaridade"), "distancia": it.get("distancia"),
+            "reconhecido": rec_txt, "tipo": it.get("tipo"),
+            "fonte": it.get("fonte") or "face-api",
+            "tem_embedding": "sim" if isinstance(emb, list) else "nao",
+            "dim_embedding": len(emb) if isinstance(emb, list) else "",
+            "embedding": ",".join(str(round(float(x), 4)) for x in emb) if isinstance(emb, list) else "",
+            "tem_foto": "sim" if it.get("foto") else "nao",
+            "created_at": it.get("created_at") or it.get("createdAt"),
+            "foto": it.get("foto") if com_foto else "",
+        })
+    return hist
+
+
+def _escrever_csv_pessoa(nome):
+    """Regrava backend/exports/<pessoa>.csv com tudo dela (chamado a cada gravação)."""
+    import csv as _csv
+    slug = _slug(nome)
+    if slug == "sem-nome":
+        return None
+    try:
+        os.makedirs(EXPORTS_DIR, exist_ok=True)
+        hist = _linhas_csv(nome, False)
+        if not hist:
+            alvo = os.path.join(EXPORTS_DIR, f"{slug}.csv")
+            if os.path.exists(alvo):
+                os.remove(alvo)
+            return None
+        cols = ["id", "nome", "idade", "genero", "expressao", "similaridade", "distancia",
+                "reconhecido", "tipo", "fonte", "tem_embedding", "dim_embedding",
+                "tem_foto", "created_at", "embedding"]
+        with open(os.path.join(EXPORTS_DIR, f"{slug}.csv"), "w", encoding="utf-8-sig", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=cols, extrasaction="ignore", delimiter=";")
+            w.writeheader()
+            for it in hist:
+                w.writerow(it)
+        return f"{slug}.csv"
+    except Exception:
+        return None
 
 
 @app.route("/api/export/backup", methods=["GET"])
@@ -947,7 +1180,36 @@ def export_backup():
     from flask import send_file
     if not os.path.exists(DB_PATH):
         return jsonify({"ok": False, "erro": "Banco ainda vazio. Grave um rosto primeiro."}), 404
-    return send_file(DB_PATH, as_attachment=True, download_name="banco-facial.db")
+    return send_file(DB_PATH, as_attachment=True, download_name=f"banco-facial-{_slug_owner()}.db")
+
+
+@app.route("/api/exports", methods=["GET"])
+def listar_exports():
+    """CSVs individuais por pessoa (backend/exports/<pessoa>.csv)."""
+    import glob as _glob
+    arquivos = []
+    try:
+        for f in sorted(_glob.glob(os.path.join(EXPORTS_DIR, "*.csv"))):
+            st = os.stat(f)
+            with open(f, encoding="utf-8-sig") as fh:
+                linhas = max(0, sum(1 for _ in fh) - 1)
+            arquivos.append({"arquivo": os.path.basename(f),
+                             "linhas": linhas,
+                             "atualizado_em": datetime.fromtimestamp(st.st_mtime).isoformat()})
+    except Exception:
+        pass
+    return jsonify({"total": len(arquivos), "arquivos": arquivos})
+
+
+@app.route("/api/exports/<slug>", methods=["GET"])
+def baixar_export(slug):
+    from flask import send_file
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9-]", "", (slug or "").lower())[:30]
+    alvo = os.path.join(EXPORTS_DIR, f"{slug}.csv")
+    if not os.path.exists(alvo):
+        return jsonify({"ok": False, "erro": "CSV dessa pessoa não existe ainda."}), 404
+    return send_file(alvo, as_attachment=True, download_name=f"{slug}.csv")
 
 
 @app.route("/api/db-info", methods=["GET"])

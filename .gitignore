@@ -7,5 +7,6 @@ banco.json
 historico.json
 *.db
 backend/models/
+backend/exports/
 .DS_Store
 Thumbs.db

@@ -140,11 +140,15 @@
 
   <div id="dbPanel">
     <div id="dbTitle">🗄️ Base de dados <span id="dbInfo">SQLite • 0 rostos • 0 análises</span></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <input id="expNome" maxlength="40" placeholder="Filtrar por pessoa... (vazio = todos)" style="flex:1;min-width:180px;padding:10px;border-radius:10px;border:1px solid #334155;background:#020617;color:#fff" />
+    </div>
     <div class="controls" style="padding:10px 0 0">
       <button id="btnExpJson" class="btn-json">⬇️ Exportar JSON</button>
       <button id="btnExpCsv" class="btn-cam">📊 Exportar CSV (Excel)</button>
       <button id="btnBackup" class="btn-auth">💾 Backup .db</button>
     </div>
+    <div id="expList" style="font-size:12px;color:#94a3b8;margin-top:8px">Nenhum CSV por pessoa ainda — grave um rosto com nome.</div>
   </div>
 
   <div class="row">
