@@ -181,17 +181,17 @@ if(videoInput){
 
   btnRecognizeVideo.onclick = async ()=>{
     if(!videoFile){ log('Escolha um vídeo primeiro.'); return; }
-    if(!cadastro){ setStatus('⛔ GRAVE UM ROSTO PRIMEIRO','denied'); return; }
+    if(!cadastro){ setStatus('GRAVE UM ROSTO PRIMEIRO','blocked'); return; }
     const fd = new FormData();
     fd.append('video', videoFile);
     setStatus('RECONHECENDO VÍDEO (MEDIAPIPE)...','scanning');
     try{
       const r = await fetch(API + "/api/reconhecer-video", { method: "POST", body: fd });
       const j = await r.json();
-      if(r.status===403 && j.bloqueado){ setStatus(j.mensagem,'denied'); return; }
+      if(r.status===403 && j.bloqueado){ setStatus(j.mensagem,'blocked'); return; }
       if(j.erro || j.ok===false){ setStatus('FALHA: '+(j.erro||''),'denied'); return; }
       $('pillScore').textContent = `Similaridade: ${j.similaridade}% dist ${j.distancia}`;
-      setStatus(j.mensagem, j.reconhecido ? 'granted' : 'denied');
+      setStatus(j.mensagem, j.reconhecido ? 'granted' : 'idle');
       log(j.reconhecido ? `Match vídeo: ${j.owner} ${j.similaridade}%` : `Vídeo sem match. dist ${j.distancia}`);
     }catch(e){ console.error(e); setStatus('ERRO NO UPLOAD','denied'); }
   };
@@ -292,7 +292,7 @@ async function carregarGaleria(){
       let tag = "<span class='gtag info'>ANALISADO</span>";
       if(item.tipo==='gravado') tag = "<span class='gtag ok'>GRAVADO ✔</span>";
       else if(item.tipo==='reconhecimento' && item.reconhecido) tag = "<span class='gtag ok'>BEM-VINDO ✔</span>";
-      else if(item.tipo==='reconhecimento') tag = "<span class='gtag no'>NEGADO ⛔</span>";
+      else if(item.tipo==='reconhecimento') tag = "<span class='gtag no'>NÃO IDENTIFICADO</span>";
       div.innerHTML =
         (item.foto ? "<img src='"+item.foto+"' />" : "") +
         "<div class='gbody'>" + tag +
@@ -388,14 +388,14 @@ btnRegisterPhoto.onclick = async ()=>{
 
 // RECONHECER foto — bloqueado se sem cadastro
 btnRecognizePhoto.onclick = async ()=>{
-  if(!cadastro){ setStatus('⛔ ACESSO NEGADO • NENHUM ROSTO GRAVADO','denied'); alert('Grave um rosto primeiro!'); return; }
+  if(!cadastro){ setStatus('NENHUM ROSTO GRAVADO AINDA • GRAVE UM ROSTO PRIMEIRO','blocked'); alert('Grave um rosto primeiro!'); return; }
   if(!lastPhoto){ log('Analise uma foto primeiro.'); return; }
   setStatus('RECONHECENDO VIA PYTHON...','scanning');
   const resp = await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:lastPhoto.payload.descriptor})});
   const j = await resp.json();
-  if(resp.status===403 || j.bloqueado){ setStatus(j.mensagem,'denied'); await apiGetStatus(); return; }
+  if(resp.status===403 || j.bloqueado){ setStatus(j.mensagem,'blocked'); await apiGetStatus(); return; }
   updatePills(lastPhoto.det, j.similaridade, j.distancia);
-  setStatus(j.mensagem, j.reconhecido ? 'granted' : 'denied');
+  setStatus(j.mensagem, j.reconhecido ? 'granted' : 'idle');
   log(j.reconhecido ? ('Match: '+j.owner+' '+j.similaridade+'%') : ('Sem match. dist '+j.distancia));
   await salvarNaGaleria('reconhecimento', { reconhecido: j.reconhecido, similaridade: j.similaridade, distancia: j.distancia });
 };
@@ -498,7 +498,7 @@ btnRegister.onclick = async ()=>{
   }catch(e){ setStatus('BACKEND OFFLINE','denied'); }
 };
 btnAuth.onclick = async ()=>{
-  if(!cadastro){ setStatus('⛔ ACESSO NEGADO • GRAVE PRIMEIRO','denied'); return; }
+  if(!cadastro){ setStatus('NENHUM ROSTO GRAVADO AINDA • GRAVE PRIMEIRO','blocked'); return; }
   if(!cameraOn){ await ligarCamera(); if(!cameraOn) return; }
   if(authActive){ authActive=false; clearInterval(authInterval); btnAuth.textContent='🔒 3. RECONHECER ao vivo'; refreshUI(); return; }
   // 1 teste imediato (melhor frame) + depois modo contínuo
@@ -507,7 +507,7 @@ btnAuth.onclick = async ()=>{
   if(d0){
     try{
       const r0=await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:Array.from(d0.descriptor)})});
-      const j0=await r0.json(); setStatus(j0.mensagem, j0.reconhecido?'granted':'denied'); updatePills(d0, j0.similaridade, j0.distancia);
+      const j0=await r0.json(); setStatus(j0.mensagem, j0.reconhecido?'granted':'idle'); updatePills(d0, j0.similaridade, j0.distancia);
     }catch(e){}
   }
   authActive=true; btnAuth.textContent='⏸️ Parar ao vivo';
@@ -516,7 +516,7 @@ btnAuth.onclick = async ()=>{
       const d=await faceapi.detectSingleFace(video,new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.4})).withFaceLandmarks().withFaceDescriptor();
       if(!d) return;
       const r=await fetch(API+"/api/reconhecer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({descriptor:Array.from(d.descriptor)})});
-      const j=await r.json(); setStatus(j.mensagem, j.reconhecido?'granted':'denied');
+      const j=await r.json(); setStatus(j.mensagem, j.reconhecido?'granted':'idle');
     }catch(e){}
   },1200);
 };

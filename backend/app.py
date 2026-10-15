@@ -580,7 +580,7 @@ def reconhecer_video():
         return jsonify({
             "reconhecido": False,
             "bloqueado": True,
-            "mensagem": "⛔ ACESSO NEGADO • NENHUM ROSTO (VÍDEO/MediaPipe) GRAVADO. Grave via /api/gravar-video primeiro."
+            "mensagem": "Nenhum rosto de vídeo gravado ainda. Grave um vídeo primeiro."
         }), 403
     if not MEDIAPIPE_OK:
         return jsonify({"reconhecido": False, "erro": "MediaPipe não instalado"}), 500
@@ -622,7 +622,7 @@ def reconhecer_video():
         "similaridade": round(sim, 1),
         "frames_com_rosto": info["frames_com_rosto"],
         "qualidade": info["qualidade"],
-        "mensagem": "⛔ ACESSO NEGADO (MediaPipe)"
+        "mensagem": "Rosto não identificado — tente de novo."
     })
 
 
@@ -634,7 +634,7 @@ def reconhecer():
         return jsonify({
             "reconhecido": False,
             "bloqueado": True,
-            "mensagem": "⛔ ACESSO NEGADO • NENHUM ROSTO GRAVADO. Grave o rosto primeiro."
+            "mensagem": "Nenhum rosto gravado ainda. Grave o rosto primeiro."
         }), 403
 
     dados = request.get_json(force=True)
@@ -665,7 +665,7 @@ def reconhecer():
             "owner": None,
             "distancia": round(dist, 4),
             "similaridade": round(sim, 1),
-            "mensagem": "⛔ ACESSO NEGADO"
+            "mensagem": "Rosto não identificado — tente de novo."
         })
 
     # Caminho 2: embedding face-api.js (128-d) — original
@@ -675,7 +675,7 @@ def reconhecer():
         return jsonify({
             "reconhecido": False,
             "bloqueado": True,
-            "mensagem": "⛔ ACESSO NEGADO • NENHUM ROSTO (FOTO) GRAVADO. Grave uma foto primeiro."
+            "mensagem": "Nenhuma foto gravada ainda. Grave uma foto primeiro."
         }), 403
 
     dist = distancia_euclidiana(banco["descriptor"], descriptor)
@@ -696,7 +696,7 @@ def reconhecer():
         "owner": None,
         "distancia": round(dist, 4),
         "similaridade": round(similaridade, 1),
-        "mensagem": "⛔ ACESSO NEGADO"
+        "mensagem": "Rosto não identificado — tente de novo."
     })
 
 
