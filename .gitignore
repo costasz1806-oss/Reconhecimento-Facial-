@@ -5,6 +5,7 @@ venv/
 .venv/
 banco.json
 historico.json
+*.db
 backend/models/
 .DS_Store
 Thumbs.db

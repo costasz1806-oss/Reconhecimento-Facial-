@@ -106,6 +106,19 @@ button:disabled{opacity:.35;cursor:not-allowed;filter:grayscale(1)}
 .gtag.info{background:rgba(56,189,248,.14);color:#bfdbfe;border:1px solid #38bdf8}
 .gdel{width:100%;margin-top:8px;padding:7px;font-size:11px;background:transparent;border:1px solid #475569;color:#cbd5e1;border-radius:8px;cursor:pointer}
 .gdel:hover{border-color:var(--danger);color:#fca5a5}
+#dbPanel{margin:12px 20px 0;padding:14px;border:1px solid var(--line);border-radius:14px;background:rgba(2,6,23,.6)}
+#dbTitle{font-size:13px;font-weight:800}
+#dbInfo{font-size:11px;color:var(--muted);font-weight:400;margin-left:6px}
+#idPanel{margin:0 20px 12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:rgba(124,58,237,.08)}
+#idTitle{font-size:13px;font-weight:800}
+#idInfo{font-size:11px;color:var(--muted);font-weight:400;margin-left:6px}
+#idResult{font-size:12px;color:var(--muted);margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.idcard{display:flex;gap:10px;align-items:center;background:rgba(2,6,23,.7);border:1px solid var(--line);border-radius:12px;padding:8px}
+.idcard img{width:64px;height:64px;object-fit:cover;border-radius:10px}
+.idcard .idbody{flex:1}
+.idcard .idname{font-weight:800}
+.idcard .idsug{color:#4ade80}
+.idcard button{flex:0 0 auto;padding:8px 12px;font-size:12px}
 /* ===== AUTO.JS: interatividade ===== */
 #toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:99;max-width:min(92vw,360px)}
 .toast{background:rgba(2,6,23,.95);border:1px solid var(--line);color:#e2e8f0;padding:11px 15px;border-radius:12px;font-size:13px;opacity:0;transform:translateY(8px);transition:.35s;box-shadow:0 12px 30px rgba(0,0,0,.5);backdrop-filter:blur(10px)}

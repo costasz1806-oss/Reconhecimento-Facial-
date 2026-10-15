@@ -267,7 +267,9 @@ async function salvarNaGaleria(tipo, extra){
         expressao: ex[0] + ' ' + Math.round(ex[1]*100) + '%',
         reconhecido: extra.reconhecido !== undefined ? extra.reconhecido : null,
         similaridade: extra.similaridade !== undefined ? extra.similaridade : null,
-        distancia: extra.distancia !== undefined ? extra.distancia : null
+        distancia: extra.distancia !== undefined ? extra.distancia : null,
+        descriptor: lastPhoto.payload.descriptor, // p/ identificar "Sem nome" depois
+        fonte: 'face-api'
       })
     });
     await carregarGaleria(); // tempo real: atualiza a aba na hora

@@ -27,8 +27,9 @@ from flask_cors import CORS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend"))
-BANCO_PATH = os.path.join(BASE_DIR, "banco.json")
-HISTORICO_PATH = os.path.join(BASE_DIR, "historico.json")
+BANCO_PATH = os.path.join(BASE_DIR, "banco.json")       # legado (migrado p/ SQLite)
+HISTORICO_PATH = os.path.join(BASE_DIR, "historico.json")  # legado (migrado p/ SQLite)
+DB_PATH = os.path.join(BASE_DIR, "banco.db")            # base oficial SQLite
 THRESHOLD = 0.6              # threshold face-api.js (128-d)
 THRESHOLD_MEDIAPIPE = 0.18   # threshold MediaPipe FaceMesh (1404-d normalizado)
 MAX_HISTORICO = 100
@@ -85,6 +86,10 @@ def _garantir_modelo_landmarker():
 
 
 def carregar_banco():
+    b = db_ativo()
+    if b:
+        return b
+    # fallback legado
     if not os.path.exists(BANCO_PATH):
         return None
     try:
@@ -95,11 +100,22 @@ def carregar_banco():
 
 
 def salvar_banco(dados):
-    with open(BANCO_PATH, "w", encoding="utf-8") as f:
-        json.dump(dados, f, ensure_ascii=False, indent=2)
+    db_salvar_rosto(dados)
+    # espelha no JSON legado p/ compatibilidade
+    try:
+        with open(BANCO_PATH, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def carregar_historico():
+    try:
+        items = db_listar_historico(MAX_HISTORICO)
+        if items:
+            return items
+    except Exception:
+        pass
     if not os.path.exists(HISTORICO_PATH):
         return []
     try:
@@ -111,8 +127,144 @@ def carregar_historico():
 
 
 def salvar_historico(lista):
-    with open(HISTORICO_PATH, "w", encoding="utf-8") as f:
-        json.dump(lista, f, ensure_ascii=False, indent=2)
+    try:
+        with open(HISTORICO_PATH, "w", encoding="utf-8") as f:
+            json.dump(lista, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# ---------- SQLite: base de dados oficial (rostos + histórico) ----------
+def _db():
+    import sqlite3
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def db_init():
+    con = _db()
+    con.execute("""CREATE TABLE IF NOT EXISTS rostos(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner TEXT, tipo TEXT, dados TEXT,
+      tem_faceapi INTEGER DEFAULT 0, tem_mediapipe INTEGER DEFAULT 0,
+      ativo INTEGER DEFAULT 1, created_at TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS historico(
+      id TEXT PRIMARY KEY, nome TEXT, foto TEXT,
+      idade REAL, genero TEXT, expressao TEXT,
+      similaridade REAL, distancia REAL, reconhecido INTEGER,
+      tipo TEXT, created_at TEXT)""")
+    # colunas novas (quem já tem db antigo ganha via ALTER)
+    for col in ("ALTER TABLE historico ADD COLUMN descriptor TEXT",
+                "ALTER TABLE historico ADD COLUMN fonte TEXT"):
+        try:
+            con.execute(col)
+        except Exception:
+            pass
+    con.commit()
+    # migração única do JSON legado
+    try:
+        n = con.execute("SELECT COUNT(*) c FROM rostos").fetchone()["c"]
+        if n == 0 and os.path.exists(BANCO_PATH):
+            with open(BANCO_PATH, encoding="utf-8") as f:
+                b = json.load(f)
+            db_salvar_rosto(b, _con=con)
+    except Exception:
+        pass
+    try:
+        n = con.execute("SELECT COUNT(*) c FROM historico").fetchone()["c"]
+        if n == 0 and os.path.exists(HISTORICO_PATH):
+            with open(HISTORICO_PATH, encoding="utf-8") as f:
+                lst = json.load(f)
+            if isinstance(lst, list):
+                for it in lst[:MAX_HISTORICO]:
+                    try:
+                        con.execute(
+                            "INSERT OR IGNORE INTO historico(id,nome,foto,idade,genero,expressao,similaridade,distancia,reconhecido,tipo,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (it.get("id"), it.get("nome"), it.get("foto"), it.get("idade"), it.get("genero"),
+                             it.get("expressao"), it.get("similaridade"), it.get("distancia"),
+                             1 if it.get("reconhecido") is True else (0 if it.get("reconhecido") is False else None),
+                             it.get("tipo"), it.get("createdAt")))
+                    except Exception:
+                        pass
+                con.commit()
+    except Exception:
+        pass
+    con.close()
+
+
+def db_salvar_rosto(dados, _con=None):
+    con = _con or _db()
+    con.execute("UPDATE rostos SET ativo=0")
+    con.execute(
+        "INSERT INTO rostos(owner,tipo,dados,tem_faceapi,tem_mediapipe,ativo,created_at) VALUES(?,?,?,?,?,?,?)",
+        (dados.get("owner"), dados.get("tipo"), json.dumps(dados, ensure_ascii=False),
+         1 if dados.get("descriptor") else 0, 1 if dados.get("mediapipe_descriptor") else 0,
+         1, dados.get("createdAt") or datetime.now().isoformat()))
+    con.commit()
+    if not _con:
+        con.close()
+        # poda: mantém últimos 20 rostos (multi-pessoa futuro)
+        try:
+            c2 = _db()
+            c2.execute("DELETE FROM rostos WHERE id NOT IN (SELECT id FROM rostos ORDER BY id DESC LIMIT 20)")
+            c2.commit(); c2.close()
+        except Exception:
+            pass
+
+
+def db_ativo():
+    try:
+        con = _db()
+        r = con.execute("SELECT dados FROM rostos WHERE ativo=1 ORDER BY id DESC LIMIT 1").fetchone()
+        con.close()
+        return json.loads(r["dados"]) if r else None
+    except Exception:
+        return None
+
+
+def db_listar_historico(limite=100):
+    con = _db()
+    rows = con.execute("SELECT * FROM historico ORDER BY created_at DESC LIMIT ?", (limite,)).fetchall()
+    con.close()
+    out = []
+    for r in rows:
+        rec = r["reconhecido"]
+        d = {"id": r["id"], "nome": r["nome"], "foto": r["foto"], "idade": r["idade"],
+             "genero": r["genero"], "expressao": r["expressao"], "similaridade": r["similaridade"],
+             "distancia": r["distancia"],
+             "reconhecido": True if rec == 1 else (False if rec == 0 else None),
+             "tipo": r["tipo"], "createdAt": r["created_at"],
+             "tem_embedding": False, "fonte": None}
+        try:
+            desc = r["descriptor"]
+            if desc:
+                d["tem_embedding"] = True
+        except Exception:
+            pass
+        try:
+            d["fonte"] = r["fonte"]
+        except Exception:
+            pass
+        out.append(d)
+    return out
+
+
+def db_add_historico(item):
+    con = _db()
+    desc = item.get("descriptor")
+    desc_txt = json.dumps(desc) if isinstance(desc, list) else None
+    con.execute(
+        "INSERT OR REPLACE INTO historico(id,nome,foto,idade,genero,expressao,similaridade,distancia,reconhecido,tipo,created_at,descriptor,fonte) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (item.get("id"), item.get("nome"), item.get("foto"), item.get("idade"), item.get("genero"),
+         item.get("expressao"), item.get("similaridade"), item.get("distancia"),
+         1 if item.get("reconhecido") is True else (0 if item.get("reconhecido") is False else None),
+         item.get("tipo"), item.get("createdAt"), desc_txt, item.get("fonte") or "face-api"))
+    con.execute("DELETE FROM historico WHERE id NOT IN (SELECT id FROM historico ORDER BY created_at DESC LIMIT ?)", (MAX_HISTORICO,))
+    con.commit(); con.close()
+
+
+db_init()
 
 
 def distancia_euclidiana(a, b):
@@ -558,6 +710,12 @@ def cadastro():
 
 @app.route("/api/apagar", methods=["DELETE"])
 def apagar():
+    try:
+        con = _db()
+        con.execute("UPDATE rostos SET ativo=0")
+        con.commit(); con.close()
+    except Exception:
+        pass
     if os.path.exists(BANCO_PATH):
         os.remove(BANCO_PATH)
     return jsonify({"ok": True, "mensagem": "Gravacao apagada. Reconhecimento bloqueado."})
@@ -585,7 +743,13 @@ def adicionar_historico():
         "reconhecido": dados.get("reconhecido"),  # True/False/None (só análise)
         "tipo": dados.get("tipo") or "analise",  # analise | gravado | reconhecimento
         "createdAt": datetime.now().isoformat(),
+        "descriptor": dados.get("descriptor"),  # embedding 128-d p/ identificar depois
+        "fonte": dados.get("fonte") or "face-api",
     }
+    try:
+        db_add_historico(item)
+    except Exception:
+        pass
     lista.insert(0, item)  # mais recente primeiro (tempo real)
     salvar_historico(lista[:MAX_HISTORICO])
     return jsonify({"ok": True, "item": item})
@@ -593,15 +757,210 @@ def adicionar_historico():
 
 @app.route("/api/historico", methods=["DELETE"])
 def limpar_historico():
+    try:
+        con = _db()
+        con.execute("DELETE FROM historico")
+        con.commit(); con.close()
+    except Exception:
+        pass
     salvar_historico([])
     return jsonify({"ok": True})
 
 
+@app.route("/api/historico/<item_id>", methods=["PUT"])
+def renomear_item(item_id):
+    """Dá nome a um 'Sem nome' depois de identificar."""
+    dados = request.get_json(force=True, silent=True) or {}
+    nome = (dados.get("nome") or "").strip()[:40]
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    try:
+        con = _db()
+        con.execute("UPDATE historico SET nome=? WHERE id=?", (nome, item_id))
+        con.commit(); con.close()
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+    salvar_historico([x if x.get("id") != item_id else {**x, "nome": nome} for x in carregar_historico()])
+    return jsonify({"ok": True, "id": item_id, "nome": nome})
+
+
+def _candidatos_nomeados():
+    """Rostos com nome: tabela rostos + histórico nomeado com embedding."""
+    cands = []
+    try:
+        con = _db()
+        for r in con.execute("SELECT owner, dados FROM rostos ORDER BY id DESC LIMIT 20").fetchall():
+            try:
+                d = json.loads(r["dados"])
+                if d.get("descriptor") and (d.get("owner") or "").strip().lower() not in ("", "sem nome"):
+                    cands.append({"nome": d["owner"], "descriptor": d["descriptor"], "origem": "cadastro"})
+            except Exception:
+                pass
+        for r in con.execute("SELECT id, nome, descriptor FROM historico LIMIT 200").fetchall():
+            try:
+                if not r["descriptor"] or not r["nome"]:
+                    continue
+                if r["nome"].strip().lower() in ("", "sem nome"):
+                    continue
+                desc = json.loads(r["descriptor"])
+                if isinstance(desc, list) and len(desc) == 128:
+                    cands.append({"nome": r["nome"], "descriptor": desc, "origem": "galeria:" + r["id"]})
+            except Exception:
+                pass
+        con.close()
+    except Exception:
+        pass
+    # dedup por nome (último vale)
+    vistos, unicos = set(), []
+    for c in cands:
+        k = c["nome"].strip().lower()
+        if k not in vistos:
+            vistos.add(k); unicos.append(c)
+    return unicos
+
+
+@app.route("/api/identificar", methods=["POST"])
+def identificar():
+    """Recebe {descriptor[128]} desconhecido e devolve ranking de nomes parecidos."""
+    dados = request.get_json(force=True, silent=True) or {}
+    desc = dados.get("descriptor")
+    if not desc or len(desc) != 128:
+        return jsonify({"ok": False, "erro": "descriptor 128-d obrigatório"}), 400
+    cands = _candidatos_nomeados()
+    if not cands:
+        return jsonify({"ok": True, "match": None, "ranking": [],
+                        "mensagem": "Nenhum rosto nomeado na base para comparar. Nomeie alguém primeiro."})
+    ranking = []
+    for c in cands:
+        try:
+            dist = distancia_euclidiana(desc, c["descriptor"])
+            ranking.append({"nome": c["nome"], "origem": c["origem"],
+                            "distancia": round(dist, 4),
+                            "similaridade": round(max(0.0, (1 - dist) * 100), 1)})
+        except Exception:
+            pass
+    ranking.sort(key=lambda x: x["distancia"])
+    top = ranking[:3]
+    melhor = top[0] if top and top[0]["distancia"] < THRESHOLD else None
+    return jsonify({"ok": True,
+                    "match": {**melhor, "confiavel": melhor["distancia"] < 0.5} if melhor else None,
+                    "ranking": top,
+                    "mensagem": f"Parece ser {melhor['nome']} ({melhor['similaridade']}%)" if melhor else "Ninguém parecido na base."})
+
+
+@app.route("/api/desconhecidos", methods=["GET"])
+def desconhecidos():
+    """Lista itens 'Sem nome' — com foto e se já tem embedding guardado."""
+    todos = carregar_historico()
+    desc = [x for x in todos if not (x.get("nome") or "").strip() or x.get("nome", "").strip().lower() == "sem nome"]
+    return jsonify({"total": len(desc), "items": desc})
+
+
+@app.route("/api/identificar-id", methods=["POST"])
+def identificar_id():
+    """Identifica um item da galeria pelo embedding GUARDADO (sem reenviar foto)."""
+    dados = request.get_json(force=True, silent=True) or {}
+    item_id = dados.get("id")
+    if not item_id:
+        return jsonify({"ok": False, "erro": "id obrigatório"}), 400
+    try:
+        con = _db()
+        r = con.execute("SELECT descriptor FROM historico WHERE id=?", (item_id,)).fetchone()
+        con.close()
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+    if not r or not r["descriptor"]:
+        return jsonify({"ok": True, "match": None, "sem_embedding": True,
+                        "mensagem": "Sem embedding guardado. Recompute pela foto."})
+    try:
+        desc = json.loads(r["descriptor"])
+    except Exception:
+        return jsonify({"ok": True, "match": None, "sem_embedding": True,
+                        "mensagem": "Embedding corrompido."})
+    cands = _candidatos_nomeados()
+    ranking = []
+    for c in cands:
+        try:
+            dist = distancia_euclidiana(desc, c["descriptor"])
+            ranking.append({"nome": c["nome"], "origem": c["origem"],
+                            "distancia": round(dist, 4),
+                            "similaridade": round(max(0.0, (1 - dist) * 100), 1)})
+        except Exception:
+            pass
+    ranking.sort(key=lambda x: x["distancia"])
+    top = ranking[:3]
+    melhor = top[0] if top and top[0]["distancia"] < THRESHOLD else None
+    return jsonify({"ok": True, "match": melhor, "ranking": top})
+
+
 @app.route("/api/historico/<item_id>", methods=["DELETE"])
 def remover_item(item_id):
+    try:
+        con = _db()
+        con.execute("DELETE FROM historico WHERE id=?", (item_id,))
+        con.commit(); con.close()
+    except Exception:
+        pass
     lista = [x for x in carregar_historico() if x.get("id") != item_id]
     salvar_historico(lista)
     return jsonify({"ok": True})
+
+
+# ---------- EXPORTAÇÃO: base de dados em documento ----------
+@app.route("/api/export/json", methods=["GET"])
+def export_json():
+    """Baixa tudo (rosto ativo + histórico) em JSON — pasta/documento de base de dados."""
+    from flask import Response
+    dump = {
+        "exportado_em": datetime.now().isoformat(),
+        "cadastro": carregar_banco(),
+        "historico": carregar_historico(),
+    }
+    return Response(json.dumps(dump, ensure_ascii=False, indent=2),
+                    mimetype="application/json",
+                    headers={"Content-Disposition": "attachment; filename=base-facial.json"})
+
+
+@app.route("/api/export/csv", methods=["GET"])
+def export_csv():
+    """Histórico em CSV (abre no Excel). ?com_foto=1 inclui thumbnail base64."""
+    import csv, io
+    from flask import Response
+    com_foto = request.args.get("com_foto") == "1"
+    hist = carregar_historico()
+    buf = io.StringIO()
+    cols = ["id", "nome", "idade", "genero", "expressao", "similaridade", "distancia", "reconhecido", "tipo", "createdAt"] + (["foto"] if com_foto else ["tem_foto"])
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for it in hist:
+        row = {k: it.get(k) for k in cols if k != "tem_foto"}
+        if not com_foto:
+            row["tem_foto"] = "sim" if it.get("foto") else "nao"
+        w.writerow(row)
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=base-facial.csv"})
+
+
+@app.route("/api/export/backup", methods=["GET"])
+def export_backup():
+    """Baixa o banco SQLite oficial (banco.db) — pasta de base de dados."""
+    from flask import send_file
+    if not os.path.exists(DB_PATH):
+        return jsonify({"ok": False, "erro": "Banco ainda vazio. Grave um rosto primeiro."}), 404
+    return send_file(DB_PATH, as_attachment=True, download_name="banco-facial.db")
+
+
+@app.route("/api/db-info", methods=["GET"])
+def db_info():
+    try:
+        con = _db()
+        n_rostos = con.execute("SELECT COUNT(*) c FROM rostos").fetchone()["c"]
+        n_hist = con.execute("SELECT COUNT(*) c FROM historico").fetchone()["c"]
+        con.close()
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+    return jsonify({"ok": True, "sqlite": os.path.basename(DB_PATH), "rostos": n_rostos,
+                    "historico": n_hist, "json_legado": os.path.exists(BANCO_PATH)})
 
 
 if __name__ == "__main__":

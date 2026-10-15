@@ -83,6 +83,13 @@
       <span id="galInfo">Nenhuma análise salva ainda.</span>
       <button id="btnClearGal" class="btn-clear sm">🗑️ Limpar galeria</button>
     </div>
+    <div id="idPanel">
+      <div id="idTitle">🔍 Quem é quem? <span id="idInfo">descobre o nome dos "Sem nome" pela base</span></div>
+      <div class="controls" style="padding:10px 0 0">
+        <button id="btnIdentificar" class="btn-auth">🔍 Identificar todos os "Sem nome"</button>
+      </div>
+      <div id="idResult"></div>
+    </div>
     <div id="gallery"></div>
   </div>
 
@@ -108,6 +115,15 @@
   <div class="controls subtle">
     <button id="btnJson" class="btn-json" disabled>⬇️ Baixar JSON embedding</button>
     <button id="btnClear" class="btn-clear">🗑️ Apagar gravação</button>
+  </div>
+
+  <div id="dbPanel">
+    <div id="dbTitle">🗄️ Base de dados <span id="dbInfo">SQLite • 0 rostos • 0 análises</span></div>
+    <div class="controls" style="padding:10px 0 0">
+      <button id="btnExpJson" class="btn-json">⬇️ Exportar JSON</button>
+      <button id="btnExpCsv" class="btn-cam">📊 Exportar CSV (Excel)</button>
+      <button id="btnBackup" class="btn-auth">💾 Backup .db</button>
+    </div>
   </div>
 
   <div class="row">

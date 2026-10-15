@@ -187,9 +187,90 @@
     }, 3000);
   }
 
+  // Base de dados: exportar JSON/CSV/backup + contador
+  function baixar(url, nome) {
+    const a = document.createElement('a');
+    a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+  }
+  function baseDados() {
+    const bJ = $('btnExpJson'), bC = $('btnExpCsv'), bB = $('btnBackup');
+    if (bJ) bJ.onclick = () => { baixar('/api/export/json', 'base-facial.json'); toast('⬇️ JSON exportado (pasta de downloads).', 'ok'); };
+    if (bC) bC.onclick = () => { baixar('/api/export/csv', 'base-facial.csv'); toast('📊 CSV exportado — abre no Excel.', 'ok'); };
+    if (bB) bB.onclick = () => { baixar('/api/export/backup', 'banco-facial.db'); toast('💾 Backup .db exportado.', 'ok'); };
+    setInterval(async () => {
+      try {
+        const r = await fetch('/api/db-info');
+        const j = await r.json();
+        if (j.ok && $('dbInfo')) $('dbInfo').textContent = `SQLite • ${j.rostos} rostos • ${j.historico} análises`;
+      } catch (e) {}
+    }, 10000);
+  }
+
+  // Quem é quem: identifica "Sem nome" pelo embedding guardado ou recomputando da foto
+  async function identificarSemNome() {
+    const box = $('idResult'), btn = $('btnIdentificar');
+    if (!box) return;
+    box.innerHTML = '🔎 Buscando desconhecidos...';
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/desconhecidos');
+      const j = await r.json();
+      if (!j.total) { box.innerHTML = '✅ Ninguém sem nome. Todos identificados!'; btn.disabled = false; return; }
+      box.innerHTML = '';
+      for (const item of j.items) {
+        const card = document.createElement('div');
+        card.className = 'idcard';
+        card.innerHTML = (item.foto ? `<img src="${item.foto}" />` : '') +
+          `<div class="idbody"><div class="idname">❓ Sem nome • ${new Date(item.createdAt).toLocaleString()}</div><div class="idsug">analisando...</div></div>`;
+        box.appendChild(card);
+        const sug = card.querySelector('.idsug');
+        try {
+          // 1) tenta pelo embedding guardado no backend
+          let resp = await fetch('/api/identificar-id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) });
+          let jj = await resp.json();
+          if (jj.match) {
+            sug.innerHTML = `parece ser <b>${jj.match.nome}</b> (${jj.match.similaridade}%) <small>${jj.match.origem}</small>`;
+            const ok = document.createElement('button');
+            ok.textContent = '✔ Confirmar ' + jj.match.nome; ok.className = 'btn-reg';
+            ok.onclick = async () => {
+              await fetch('/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: jj.match.nome }) });
+              toast('Nome atualizado: ' + jj.match.nome, 'ok'); card.remove();
+            };
+            card.appendChild(ok);
+            continue;
+          }
+          // 2) sem embedding: recomputa da thumbnail com face-api
+          if (jj.sem_embedding && item.foto) {
+            sug.textContent = 'recalculando rosto da foto...';
+            const img = new Image();
+            img.src = item.foto;
+            await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+            const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor();
+            if (!det) { sug.textContent = 'rosto ilegível — digite o nome manual na galeria.'; continue; }
+            const r2 = await fetch('/api/identificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descriptor: Array.from(det.descriptor) }) });
+            const j2 = await r2.json();
+            if (j2.match) {
+              sug.innerHTML = `parece ser <b>${j2.match.nome}</b> (${j2.match.similaridade}%)`;
+              const ok2 = document.createElement('button');
+              ok2.textContent = '✔ Confirmar ' + j2.match.nome; ok2.className = 'btn-reg';
+              ok2.onclick = async () => {
+                await fetch('/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: j2.match.nome }) });
+                toast('Nome atualizado: ' + j2.match.nome, 'ok'); card.remove();
+              };
+              card.appendChild(ok2);
+            } else sug.textContent = j2.mensagem || 'ninguém parecido na base.';
+          } else sug.textContent = jj.mensagem || 'ninguém parecido na base.';
+        } catch (e) { sug.textContent = 'erro: ' + e.message; }
+      }
+      toast('Identificação concluída. Confirme os nomes.', 'info');
+    } catch (e) { box.innerHTML = 'Backend offline.'; }
+    btn.disabled = false;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     watchStatus(); autoAnalisar(); dragDrop();
-    videoComProgresso(); pollingBackend(); atalhos(); dicaViva();
+    videoComProgresso(); pollingBackend(); atalhos(); dicaViva(); baseDados();
+    if ($('btnIdentificar')) $('btnIdentificar').onclick = identificarSemNome;
     marcarSteps('blocked');
     console.log('🤖 auto.js ativo: automação + interatividade ligadas.');
   });
