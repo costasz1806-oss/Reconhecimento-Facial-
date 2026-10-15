@@ -87,17 +87,19 @@ nameInput.addEventListener('input', ()=> nameInput.dataset.touched = '1');
 
 // abas
 function showPane(which){
-  ['Foto','Cam','Video','Galeria'].forEach(t=>{
+  ['Foto','Cam','Video','Galeria','Desenho'].forEach(t=>{
     $('tab'+t).classList.toggle('active', t===which);
     $('pane'+t).hidden = (t!==which);
   });
   if(which==='Galeria') carregarGaleria();
   if(which==='Video') checkMediapipe();
+  if(which==='Desenho' && typeof prepararDesenho === 'function') prepararDesenho();
 }
 $('tabFoto').onclick = ()=>showPane('Foto');
 $('tabCam').onclick = ()=>showPane('Cam');
 $('tabVideo').onclick = ()=>showPane('Video');
 $('tabGaleria').onclick = ()=>showPane('Galeria');
+$('tabDesenho').onclick = ()=>showPane('Desenho');
 
 // ---- VIDEO -> backend MediaPipe ----
 const videoInput = $('videoInput'), videoName = $('videoName'), videoPreview = $('videoPreview');

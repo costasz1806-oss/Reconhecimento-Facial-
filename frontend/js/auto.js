@@ -161,6 +161,7 @@
       else if (k === '2') $('tabCam').click();
       else if (k === '3' && $('tabVideo')) $('tabVideo').click();
       else if (k === '4') $('tabGaleria').click();
+      else if (k === '5' && $('tabDesenho')) $('tabDesenho').click();
       else if (k === 'a' && !$('btnAnalyzePhoto').disabled) $('btnAnalyzePhoto').click();
       else if (k === 'g') {
         if (!$('btnRegisterPhoto').disabled) $('btnRegisterPhoto').click();

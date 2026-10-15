@@ -23,6 +23,7 @@
     <button id="tabCam" class="tab">📷 Câmera</button>
     <button id="tabVideo" class="tab">🎥 Vídeo MP</button>
     <button id="tabGaleria" class="tab">🗂️ Galeria <span id="galCount">0</span></button>
+    <button id="tabDesenho" class="tab">✏️ Desenho</button>
   </div>
 
   <div id="steps">
@@ -93,6 +94,26 @@
     <div id="gallery"></div>
   </div>
 
+  <!-- DESENHO: arame do rosto a partir do JSON -->
+  <div id="paneDesenho" hidden>
+    <div style="padding:14px 20px">
+      <p style="font-size:13px;color:#94a3b8;margin:0 0 10px">O desenho é o <b style="color:#fff">arame do rosto</b> guardado no JSON — não é a foto. 68 pontos (foto/câmera) ou 468 pontos (vídeo MediaPipe).</p>
+      <div class="controls" style="padding:0 0 10px">
+        <button id="btnDrawCadastro" class="btn-cam">✏️ Desenhar meu cadastro</button>
+        <label for="drawFile" id="fileLabel">📁 Abrir JSON...</label>
+        <input id="drawFile" type="file" accept=".json,application/json" hidden />
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <select id="drawHistSelect" style="flex:1;min-width:200px;padding:10px;border-radius:10px;border:1px solid #334155;background:#020617;color:#fff">
+          <option value="">— ou redesenhe da foto salva na galeria —</option>
+        </select>
+        <button id="btnDrawHist" class="btn-auth" style="flex:0 0 auto">✏️ Desenhar</button>
+      </div>
+      <canvas id="drawCanvas" width="640" height="480" style="width:100%;border-radius:14px;background:#020617;border:1px solid #334155"></canvas>
+      <div id="drawInfo" style="font-size:12px;color:#94a3b8;margin-top:8px">Nenhum desenho ainda.</div>
+    </div>
+  </div>
+
   <h2 id="status" class="blocked">ENVIE UMA FOTO PARA COMEÇAR</h2>
 
   <div id="nameRow">
@@ -141,5 +162,6 @@
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script src="js/app.js"></script>
 <script src="js/auto.js"></script>
+<script src="js/draw.js"></script>
 </body>
 </html>
