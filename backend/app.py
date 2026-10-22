@@ -22,10 +22,12 @@ import math
 import os
 import tempfile
 from datetime import datetime
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, "..", ".env"))
 FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend"))
 BANCO_PATH = os.path.join(BASE_DIR, "banco.json")       # legado (migrado p/ SQLite)
 HISTORICO_PATH = os.path.join(BASE_DIR, "historico.json")  # legado (migrado p/ SQLite)

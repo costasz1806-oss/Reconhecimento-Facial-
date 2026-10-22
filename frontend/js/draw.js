@@ -69,7 +69,7 @@
   async function prepararDesenho() {
     // preenche o select da galeria (foto + nome)
     try {
-      const r = await fetch('/api/historico');
+      const r = await fetch(API + '/api/historico');
       const lista = await r.json();
       const sel = $('drawHistSelect');
       if (sel && sel.options.length <= 1) {
@@ -89,7 +89,7 @@
     if (btnC) btnC.onclick = async () => {
       info('Buscando cadastro...');
       try {
-        const r = await fetch('/api/cadastro');
+        const r = await fetch(API + '/api/cadastro');
         if (!r.ok) { info('Nenhum rosto gravado ainda. Grave primeiro.'); return; }
         desenharRegistro(await r.json(), 'Cadastro');
       } catch (e) { info('Backend offline.'); }

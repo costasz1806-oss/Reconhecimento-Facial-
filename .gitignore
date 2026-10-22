@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 venv/
 .venv/
+.env
 banco.json
 historico.json
 *.db

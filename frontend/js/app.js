@@ -1,5 +1,11 @@
 // FRONTEND FOTO + CAMERA -> backend Python /api
-const API = "";
+const API = (() => {
+  const h = location.hostname;
+  const local = location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1' || h === '';
+  if (!local) return '';
+  if (location.protocol === 'file:' || location.port !== '5000') return 'http://localhost:5000';
+  return '';
+})();
 const $ = (id) => document.getElementById(id);
 const video = $('video'), canvas = $('overlay');
 const photo = $('photo'), photoCanvas = $('photoCanvas');
@@ -24,7 +30,6 @@ async function ensureModels(){
   if(typeof faceapi === 'undefined'){ setStatus('FACE-API NÃO CARREGOU (CDN)','denied'); log('Sem internet ou CDN bloqueado. Recarregue a página.'); return false; }
   log('Carregando IA...'); setStatus('CARREGANDO IA...','scanning');
   const URLS = [
-    'models',
     'https://justadudewhohacks.github.io/face-api.js/models',
     'https://venus714.github.io/Face-Recognition-Using-Face-API/models',
     'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights'

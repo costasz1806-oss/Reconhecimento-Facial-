@@ -140,7 +140,7 @@
   function pollingBackend() {
     setInterval(async () => {
       try {
-        const r = await fetch('/api/status');
+        const r = await fetch(API + '/api/status');
         const j = await r.json();
         const badge = $('cadBadge');
         if (badge && j.gravado && badge.classList.contains('no')) {
@@ -189,9 +189,26 @@
   }
 
   // Base de dados: exportar JSON/CSV/backup + contador
-  function baixar(url, nome) {
-    const a = document.createElement('a');
-    a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+  async function baixar(url, nome) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) {
+        let msg = 'Falha ao exportar (HTTP ' + r.status + ')';
+        try { const j = await r.json(); if (j && j.erro) msg = j.erro; } catch (e) {}
+        toast('⚠️ ' + msg, 'erro');
+        return false;
+      }
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nome || 'export';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      return true;
+    } catch (e) {
+      toast('⚠️ Erro ao exportar: ' + e.message, 'erro');
+      return false;
+    }
   }
   function baseDados() {
     const bJ = $('btnExpJson'), bC = $('btnExpCsv'), bB = $('btnBackup');
@@ -199,30 +216,30 @@
       const base = (forcar || '').trim();
       if (base) return base.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9áéíóúâêôãõç-]/gi, '').slice(0, 30) || 'sem-nome';
       try {
-        const r = await fetch('/api/status');
+        const r = await fetch(API + '/api/status');
         const j = await r.json();
         return (j.owner || 'sem-nome').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9áéíóúâêôãõç-]/gi, '').slice(0, 30) || 'sem-nome';
       } catch (e) { return 'sem-nome'; }
     }
     if (bJ) bJ.onclick = async () => {
       const n = (($('expNome') && $('expNome').value) || '').trim();
-      baixar('/api/export/json' + (n ? '?nome=' + encodeURIComponent(n) : ''), `rosto-${await donoSlug(n)}.json`);
-      toast(n ? `⬇️ JSON de ${n} exportado.` : '⬇️ JSON exportado (pasta de downloads).', 'ok');
+      const ok = await baixar(API + '/api/export/json' + (n ? '?nome=' + encodeURIComponent(n) : ''), `rosto-${await donoSlug(n)}.json`);
+      if (ok) toast(n ? `⬇️ JSON de ${n} exportado.` : '⬇️ JSON exportado (pasta de downloads).', 'ok');
     };
     if (bC) bC.onclick = async () => {
       const n = (($('expNome') && $('expNome').value) || '').trim();
-      baixar('/api/export/csv' + (n ? '?nome=' + encodeURIComponent(n) : ''), `base-facial-${await donoSlug(n)}.csv`);
-      toast(n ? `📊 CSV de ${n} exportado.` : '📊 CSV exportado — abre no Excel.', 'ok');
+      const ok = await baixar(API + '/api/export/csv' + (n ? '?nome=' + encodeURIComponent(n) : ''), `base-facial-${await donoSlug(n)}.csv`);
+      if (ok) toast(n ? `📊 CSV de ${n} exportado.` : '📊 CSV exportado — abre no Excel.', 'ok');
     };
-    if (bB) bB.onclick = async () => { baixar('/api/export/backup', `banco-facial-${await donoSlug()}.db`); toast('💾 Backup .db exportado.', 'ok'); };
+    if (bB) bB.onclick = async () => { if (await baixar(API + '/api/export/backup', `banco-facial-${await donoSlug()}.db`)) toast('💾 Backup .db exportado.', 'ok'); };
     setInterval(async () => {
       try {
-        const r = await fetch('/api/db-info');
+        const r = await fetch(API + '/api/db-info');
         const j = await r.json();
         if (j.ok && $('dbInfo')) $('dbInfo').textContent = `SQLite • ${j.rostos} rostos • ${j.historico} análises`;
       } catch (e) {}
       try {
-        const r2 = await fetch('/api/exports');
+        const r2 = await fetch(API + '/api/exports');
         const j2 = await r2.json();
         const box = $('expList');
         if (box) {
@@ -231,7 +248,7 @@
             box.innerHTML = '📁 CSVs por pessoa: ';
             j2.arquivos.forEach((a, i) => {
               const link = document.createElement('a');
-              link.href = '/api/exports/' + a.arquivo.replace(/\.csv$/, '');
+              link.href = API + '/api/exports/' + a.arquivo.replace(/\.csv$/, '');
               link.textContent = `${a.arquivo} (${a.linhas})`;
               link.style.cssText = 'color:#38bdf8;margin-right:10px';
               box.appendChild(link);
@@ -249,7 +266,7 @@
     box.innerHTML = '🔎 Buscando desconhecidos...';
     btn.disabled = true;
     try {
-      const r = await fetch('/api/desconhecidos');
+      const r = await fetch(API + '/api/desconhecidos');
       const j = await r.json();
       if (!j.total) { box.innerHTML = '✅ Ninguém sem nome. Todos identificados!'; btn.disabled = false; return; }
       box.innerHTML = '';
@@ -262,14 +279,14 @@
         const sug = card.querySelector('.idsug');
         try {
           // 1) tenta pelo embedding guardado no backend
-          let resp = await fetch('/api/identificar-id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) });
+          let resp = await fetch(API + '/api/identificar-id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) });
           let jj = await resp.json();
           if (jj.match) {
             sug.innerHTML = `parece ser <b>${jj.match.nome}</b> (${jj.match.similaridade}%) <small>${jj.match.origem}</small>`;
             const ok = document.createElement('button');
             ok.textContent = '✔ Confirmar ' + jj.match.nome; ok.className = 'btn-reg';
             ok.onclick = async () => {
-              await fetch('/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: jj.match.nome }) });
+              await fetch(API + '/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: jj.match.nome }) });
               toast('Nome atualizado: ' + jj.match.nome, 'ok'); card.remove();
             };
             card.appendChild(ok);
@@ -283,14 +300,14 @@
             await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
             const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor();
             if (!det) { sug.textContent = 'rosto ilegível — digite o nome manual na galeria.'; continue; }
-            const r2 = await fetch('/api/identificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descriptor: Array.from(det.descriptor) }) });
+            const r2 = await fetch(API + '/api/identificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descriptor: Array.from(det.descriptor) }) });
             const j2 = await r2.json();
             if (j2.match) {
               sug.innerHTML = `parece ser <b>${j2.match.nome}</b> (${j2.match.similaridade}%)`;
               const ok2 = document.createElement('button');
               ok2.textContent = '✔ Confirmar ' + j2.match.nome; ok2.className = 'btn-reg';
               ok2.onclick = async () => {
-                await fetch('/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: j2.match.nome }) });
+                await fetch(API + '/api/historico/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: j2.match.nome }) });
                 toast('Nome atualizado: ' + j2.match.nome, 'ok'); card.remove();
               };
               card.appendChild(ok2);
