@@ -825,6 +825,8 @@ def apagar():
         pass
     if os.path.exists(BANCO_PATH):
         os.remove(BANCO_PATH)
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
     return jsonify({"ok": True, "mensagem": "Gravacao apagada. Reconhecimento bloqueado."})
 
 
@@ -1233,4 +1235,4 @@ if __name__ == "__main__":
     print("  Abra: http://localhost:5000")
     print(f"  MediaPipe: {'OK v' + str(MEDIAPIPE_VERSAO) if MEDIAPIPE_OK else 'NAO INSTALADO -> pip install -r requirements.txt'}")
     print("=" * 50)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)

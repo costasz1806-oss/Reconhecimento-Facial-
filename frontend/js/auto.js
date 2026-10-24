@@ -62,26 +62,7 @@
     setTimeout(() => card.classList.remove('party'), 1200);
   }
 
-  // Auto-análise: app.js já analisa sozinho no upload; aqui é só backup seguro
-  function autoAnalisar() {
-    const btn = $('btnAnalyzePhoto'), photo = $('photo');
-    if (!btn || !photo) return;
-    let ultimaSrc = '';
-    setInterval(() => {
-      // só clica se: tem arquivo, imagem 100% carregada, botão livre e app.js não está analisando
-      const temArquivo = document.getElementById('fileInput').files.length > 0;
-      const pronta = photo.complete && photo.naturalWidth > 0;
-      const livre = !btn.disabled && typeof analyzing !== 'undefined' ? !analyzing : !btn.disabled;
-      if (temArquivo && pronta && photo.src !== ultimaSrc && livre && btn.offsetParent !== null) {
-        ultimaSrc = photo.src;
-        setTimeout(() => {
-          const aindaLivre = !document.getElementById('btnAnalyzePhoto').disabled;
-          if (aindaLivre && photo.complete && photo.naturalWidth > 0) { toast('🤖 Análise automática iniciada...', 'info'); btn.click(); }
-        }, 800);
-      }
-      if (!temArquivo) ultimaSrc = '';
-    }, 1500);
-  }
+  // Auto-análise removida: a análise agora é manual (botão "Analisar foto" / tecla A)
 
   // Drag & drop de foto e vídeo em qualquer lugar do card
   function dragDrop() {
@@ -101,7 +82,7 @@
         $('fileInput').files = dt.files;
         $('fileInput').dispatchEvent(new Event('change'));
         document.querySelector('#tabFoto').click();
-        toast('📸 Foto recebida por arrastar! Analisando...', 'info');
+        toast('📸 Foto recebida por arrastar! Clique em A (Analisar)...', 'info');
       } else if (f.type.startsWith('video/')) {
         const dt = new DataTransfer(); dt.items.add(f);
         $('videoInput').files = dt.files;
@@ -182,8 +163,8 @@
       const badge = $('cadBadge');
       const gravado = badge && badge.classList.contains('yes');
       const temFoto = !!($('photo') && $('photo').src);
-      if (!temFoto && !gravado) hint.innerHTML = '💡 <b>Passo 1:</b> arraste uma foto para cá ou clique em Escolher foto — a análise é <b>automática</b>.';
-      else if (temFoto && !gravado) hint.innerHTML = '💡 Foto detectada! O sistema analisou sozinho — clique <b>GRAVAR (G)</b> para liberar o reconhecimento.';
+      if (!temFoto && !gravado) hint.innerHTML = '💡 <b>Passo 1:</b> arraste uma foto para cá ou clique em Escolher foto — depois clique em <b>A</b> (Analisar) para ler o rosto.';
+      else if (temFoto && !gravado) hint.innerHTML = '💡 Foto detectada! Clique em <b>A</b> (Analisar) para ler o rosto — depois <b>GRAVAR (G)</b> para liberar o reconhecimento.';
       else if (gravado) hint.innerHTML = '💡 Rosto gravado! Envie <b>outra foto/vídeo</b> e pressione <b>R</b> para testar o reconhecimento.';
     }, 3000);
   }
@@ -321,7 +302,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    watchStatus(); autoAnalisar(); dragDrop();
+    watchStatus(); dragDrop();
     videoComProgresso(); pollingBackend(); atalhos(); dicaViva(); baseDados();
     if ($('btnIdentificar')) $('btnIdentificar').onclick = identificarSemNome;
     marcarSteps('blocked');

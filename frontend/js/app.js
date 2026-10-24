@@ -228,9 +228,8 @@ fileInput.onchange = async ()=>{
   btnAnalyzePhoto.disabled = true; refreshUI();
   try{
     await esperarFotoPronta();
-    log('Foto carregada (' + photo.naturalWidth + 'x' + photo.naturalHeight + '). Analisando sozinho...');
-    pendingAuto = false;
-    await analisarFoto();
+    log('Foto carregada (' + photo.naturalWidth + 'x' + photo.naturalHeight + '). Pronta!');
+    setStatus('FOTO PRONTA ✔ • CLIQUE EM "ANALISAR FOTO" PARA CONTINUAR','idle');
   }catch(e){ setStatus(e.message || 'FALHA AO CARREGAR FOTO','denied'); log(e.message); }
   refreshUI();
 };
@@ -324,7 +323,7 @@ async function analisarFoto(){
   if(!fileInput.files.length){ log('Escolha uma foto primeiro.'); setStatus('ESCOLHA UMA FOTO','blocked'); return; }
   try{ await esperarFotoPronta(); }
   catch(e){ setStatus(e.message,'denied'); return; }
-  if(!await ensureModels()) return;
+  if(!await ensureModels()){ analyzing = false; refreshUI(); return; }
   analyzing = true; refreshUI();
   setStatus('ANALISANDO FOTO...','scanning'); log('Analisando rosto da foto...');
   try{
